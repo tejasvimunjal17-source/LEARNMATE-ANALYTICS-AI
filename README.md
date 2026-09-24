@@ -6,6 +6,13 @@
 
 **From Student Data to Employability Intelligence**
 
+<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" alt="" style="max-width: 100%; display: inline-block;" data-target="animated-image.originalImage">
+
+![Image Alt](https://github.com/tejasvimunjal17-source/Let-s-Magic/blob/main/file_0000000073448230a125e552f72baab0.png)
+
+<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" alt="" style="max-width: 100%; display: inline-block;" data-target="animated-image.originalImage">
+
+
 <br>
 
 ![Python](https://img.shields.io/badge/Python-0B3D2E?style=for-the-badge&logo=python&logoColor=14B8A6)
