@@ -132,13 +132,21 @@ DATA → DATA QUALITY → EDA → CLASSIFICATION → REGRESSION → CLUSTERING �
 ## 7. Project Architecture
 
 ```
-app.py                       # Streamlit UI — all pages, routing, caching
-utils/
-├── data_processing.py       # Load, clean, validate, feature/target split, preprocessing pipelines
-├── analytics.py              # Deterministic KPI/group/correlation calculations + insight text
-├── visualizations.py         # All Plotly chart builders (themed)
-├── ml_models.py               # Classification, regression, K-Means segmentation, What-If helpers
-└── ai_insights.py             # Evidence registry + deterministic fallback + optional LLM layer
+├── app.py                         # Streamlit UI, page routing, navigation, session state and caching
+│
+├── government_services.py         # Government and student-support services
+├── chatbot.py                     # AI chatbot interface, quick prompts and conversation handling
+├── custom_sidebar.py              # Custom sidebar navigation, styling and AI Chatbot toggle
+│
+├── .streamlit/
+│   └── config.toml                # Streamlit application configuration and theme settings
+│
+└── utils/
+    ├── data_processing.py         # Load, validate, clean, profile datasets and prepare features/targets
+    ├── analytics.py               # Deterministic KPI, group, correlation and analytical calculations
+    ├── visualizations.py          # Plotly/Matplotlib chart builders and visualization helpers
+    ├── ml_models.py               # Classification, regression, K-Means segmentation and What-If helpers
+    └── ai_insights.py             # Evidence registry, dataset-aware responses, deterministic fallback and optional LLM layer
 ```
 
 > **Architecture choice:** a practical single-`app.py` + `utils/` layout (per the internship's own "keep it practical" guidance) rather than a deeper package structure, since the project stayed manageable at this size.
@@ -234,13 +242,16 @@ streamlit run app.py
 
 ```
 LearnMate-Analytics-AI/
+│
 ├── app.py
-├── requirements.txt
-├── README.md
-├── PROJECT_REPORT.md
-├── tests_stage2_smoke.py
-├── data/
-│   └── campus_placement.csv
+│
+├── government_services.py
+├── chatbot.py
+├── custom_sidebar.py
+│
+├── .streamlit/
+│   └── config.toml
+│
 └── utils/
     ├── data_processing.py
     ├── analytics.py
