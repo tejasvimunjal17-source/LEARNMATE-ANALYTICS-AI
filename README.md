@@ -122,8 +122,17 @@ Source: https://www.kaggle.com/datasets/benroshan/factors-affecting-campus-place
 DATA → DATA QUALITY → EDA → CLASSIFICATION → REGRESSION → CLUSTERING → AI INSIGHTS → WHAT-IF SIMULATION
 ```
 
+
 | Stage | What it does |
 |---|---|
+| **Data Quality** | Loads, validates, profiles and prepares the active dataset |
+| **EDA** | Generates descriptive statistics, relationships, correlations and analytical insights |
+| **Classification** | Performs placement classification when a compatible target and feature structure are available |
+| **Regression** | Performs numerical prediction when a compatible regression target is available |
+| **Clustering** | Segments student records using unsupervised learning where appropriate |
+| **AI Insights** | Provides evidence-grounded interpretations from the active dataset |
+| **What-If Simulation** | Runs scenario experiments when the required trained classification model is available |
+
 ### Dataset-Adaptive Workflow
 
 The application can load compatible CSV and XLSX datasets, profile their structure, detect available analytical capabilities, and provide generic analytical functionality where the required fields are available. The original campus-placement dataset remains a supported specialized benchmark mode.
@@ -160,13 +169,14 @@ The application can load compatible CSV and XLSX datasets, profile their structu
 
 `Overview` · `Data Explorer` · `Exploratory Data Analysis` · `Student Segmentation` · `AI Insight Copilot` · `What-If Simulator` · `Placement Prediction` · `Salary Prediction` · `Model Evaluation` · `Project Summary` · `Government Services`
 
+> **Note:** The AI Chatbot is integrated into the application interface rather than being a separate analytical page.
 </div>
 
 ---
 
 ## 9. Key Findings
 
-*All figures below are calculated live by the application from the current dataset.*
+*The figures below represent results from the original 215-row campus-placement benchmark dataset. When another compatible dataset is uploaded, the application's generic analytics are recalculated for the active dataset.*
 
 - **215 students**, **148 placed**, **67 not placed** — **68.8%** observed placement rate
 - Average salary among placed students: **₹288,655** (median **₹265,000**), based on 148 salary records
