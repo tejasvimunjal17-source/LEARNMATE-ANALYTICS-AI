@@ -6,12 +6,7 @@
 
 **From Student Data to Employability Intelligence**
 
-<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" alt="" style="max-width: 100%; display: inline-block;" data-target="animated-image.originalImage">
-
 ![Image Alt](https://github.com/tejasvimunjal17-source/LEARNMATE-ANALYTICS-AI/blob/main/LearnMate%20Analytics%20AI%20Blueprint%20Architecture.png)
-
-<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" alt="" style="max-width: 100%; display: inline-block;" data-target="animated-image.originalImage">
-
 
 <br>
 
@@ -26,6 +21,13 @@
 </div>
 
 <br>
+
+<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" alt="" style="max-width: 100%; display: inline-block;" data-target="animated-image.originalImage">
+
+Live at - https://learnmate-analytics-ai-student-employability.streamlit.app/ 
+
+<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" alt="" style="max-width: 100%; display: inline-block;" data-target="animated-image.originalImage">
+
 
 > A Streamlit-based student employability and placement intelligence platform built for the AICTE | IBM SkillsBuild Data Analytics with AI Internship 2026 (BharatCares). It turns a real campus-placement dataset into exploratory analytics, classification, regression, clustering, grounded AI insights, and interactive scenario simulation — with every number calculated live from the data, not hard-coded.
 
