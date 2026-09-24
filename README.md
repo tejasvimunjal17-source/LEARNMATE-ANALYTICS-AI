@@ -50,7 +50,11 @@ Live At: https://learnmate-analytics-ai-student-employability.streamlit.app/
 
 ## 1. Project Overview
 
-LearnMate Analytics AI combines Data Analytics, Exploratory Data Analysis, Classification, Regression, Clustering, explainable model evaluation, grounded AI insights, and scenario simulation into a single application. It is an **educational demonstration**, not a production employability predictor — it does not guarantee any individual's placement or salary outcome.
+LearnMate Analytics AI combines Data Analytics, Exploratory Data Analysis, Classification, Regression, Clustering, explainable model evaluation, grounded AI insights, and scenario simulation into a single dataset-adaptive application.
+
+The platform supports the original campus-placement benchmark workflow while also providing generic analytics capabilities for compatible student and campus-related CSV/XLSX datasets.
+
+It is an **educational demonstration**, not a production employability predictor — it does not guarantee any individual's placement or salary outcome.
 
 ---
 
@@ -80,7 +84,8 @@ Student placement datasets contain academic, educational, work-experience and sp
 | **Salary Prediction** | Linear Regression and Random Forest Regressor with a live prediction form |
 | **Model Evaluation** | Full classification and regression metric suites, confusion matrices, ROC curves, coefficients/feature importances, and a depth-limited decision tree visualization |
 | **Project Summary** | A consolidated, submission-ready overview of the whole project |
-
+| **AI Chatbot** | An interactive analytics-focused assistant with quick prompts and conversation support, using the project's grounded AI insight functionality where available |
+| **Government Services** | Provides integrated student and government-support resources through a dedicated application page |
 ---
 
 ## 4. Technology Stack
@@ -119,13 +124,9 @@ DATA → DATA QUALITY → EDA → CLASSIFICATION → REGRESSION → CLUSTERING �
 
 | Stage | What it does |
 |---|---|
-| Data Quality | Validates schema, checks duplicates/missing values, prepares a model-ready dataframe |
-| EDA | Explores placement, academic performance, salary, and relationships |
-| Classification | Predicts placement with Logistic Regression + Decision Tree |
-| Regression | Estimates salary (placed students only) with Linear Regression + Random Forest Regressor |
-| Clustering | Groups students with K-Means, diagnosed via Elbow/Silhouette |
-| AI Insights | Answers analytical questions from verified evidence, with a no-API fallback |
-| What-If Simulation | Compares hypothetical profiles through the existing trained classification model |
+### Dataset-Adaptive Workflow
+
+The application can load compatible CSV and XLSX datasets, profile their structure, detect available analytical capabilities, and provide generic analytical functionality where the required fields are available. The original campus-placement dataset remains a supported specialized benchmark mode.
 
 ---
 
@@ -157,7 +158,7 @@ DATA → DATA QUALITY → EDA → CLASSIFICATION → REGRESSION → CLUSTERING �
 
 <div align="center">
 
-`Overview` · `Data Explorer` · `Exploratory Data Analysis` · `Student Segmentation` · `AI Insight Copilot` · `What-If Simulator` · `Placement Prediction` · `Salary Prediction` · `Model Evaluation` · `Project Summary`
+`Overview` · `Data Explorer` · `Exploratory Data Analysis` · `Student Segmentation` · `AI Insight Copilot` · `What-If Simulator` · `Placement Prediction` · `Salary Prediction` · `Model Evaluation` · `Project Summary` · `Government Services`
 
 </div>
 
@@ -234,7 +235,7 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-> **[VERIFY BEFORE SUBMISSION]**: this application has not been deployed to Streamlit Community Cloud or any other host as part of this build — it has only been run and tested locally/in a sandboxed environment. No deployment URL exists unless you deploy it yourself.
+> The application is deployed on Streamlit Community Cloud. The live application is available at the project URL shown at the top of this README.
 
 ---
 
@@ -276,7 +277,7 @@ All Python files compile cleanly (`python -m py_compile`)
 <summary><strong>Smoke tests</strong> (<code>tests_stage2_smoke.py</code>)</summary>
 <br>
 
-Stubs Streamlit + Plotly and executes the real `app.py` logic for every page (10/10 pages), catching real runtime errors even though visual rendering can't be verified in a headless sandbox
+Stubs Streamlit + Plotly and executes the real `app.py` logic for every page (11/11 pages), catching real runtime errors even though visual rendering can't be verified in a headless sandbox
 
 </details>
 
