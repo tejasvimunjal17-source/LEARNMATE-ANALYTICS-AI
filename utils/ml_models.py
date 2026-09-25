@@ -803,6 +803,237 @@ def simulate_categorical_feature(results: ClassificationResults, model_name: str
     return pd.DataFrame(rows)
 
 
+# ===========================================================================
+# GENERIC (DATASET-AGNOSTIC) ML LAYER
+# ===========================================================================
+#
+# Everything above this line is BENCHMARK-SPECIFIC and UNCHANGED - it still
+# assumes the campus-placement column names and is exactly what Stages 3-7
+# use. Everything below makes NO assumption about column names: it receives
+# a dataframe, a chosen target column, and a chosen feature-column list from
+# the caller (app.py), and works with whatever those turn out to be. This is
+# what powers the app's GENERIC mode for a dataset that isn't the benchmark.
+
+GENERIC_CLASSIFICATION_MODELS = {
+    "Logistic Regression": lambda: LogisticRegression(max_iter=1000, random_state=RANDOM_STATE),
+    "Decision Tree": lambda: DecisionTreeClassifier(max_depth=4, random_state=RANDOM_STATE),
+}
+GENERIC_REGRESSION_MODELS = {
+    "Linear Regression": lambda: LinearRegression(),
+    "Random Forest Regressor": lambda: RandomForestRegressor(n_estimators=300, max_depth=6, random_state=RANDOM_STATE),
+}
+
+
+@dataclass
+class GenericTaskValidation:
+    """Returned BEFORE attempting to train anything, so the UI can show a
+    clear reason instead of a stack trace when a dataset/target genuinely
+    isn't usable for the requested task."""
+    ok: bool
+    reason: str = ""
+
+
+def validate_generic_target(df: pd.DataFrame, target_col: str, task: str,
+                             min_rows: int = 20) -> GenericTaskValidation:
+    if target_col not in df.columns:
+        return GenericTaskValidation(False, f"Column '{target_col}' does not exist in this dataset.")
+    series = df[target_col].dropna()
+    if len(series) < min_rows:
+        return GenericTaskValidation(False, f"Only {len(series)} non-missing values in '{target_col}' - "
+                                             f"need at least {min_rows} for a meaningful train/test split.")
+    n_unique = series.nunique()
+    if n_unique <= 1:
+        return GenericTaskValidation(False, f"'{target_col}' has only {n_unique} unique value(s) - "
+                                             f"there is nothing to predict.")
+    if task == "classification":
+        if pd.api.types.is_numeric_dtype(series) and n_unique > 15:
+            return GenericTaskValidation(False, f"'{target_col}' looks like a continuous numeric column "
+                                                 f"({n_unique} unique values) - consider Regression instead.")
+        if n_unique > 15:
+            return GenericTaskValidation(False, f"'{target_col}' has {n_unique} distinct categories - "
+                                                 f"too many for a reliable classification target here.")
+    elif task == "regression":
+        if not pd.api.types.is_numeric_dtype(series):
+            return GenericTaskValidation(False, f"'{target_col}' is not numeric - Regression needs a "
+                                                 f"numeric continuous target. Consider Classification instead.")
+    else:
+        return GenericTaskValidation(False, f"Unknown task '{task}'.")
+    return GenericTaskValidation(True)
+
+
+def build_generic_preprocessor(numeric_cols: list[str], categorical_cols: list[str]) -> ColumnTransformer:
+    """Same shape as the benchmark preprocessor, but built from WHATEVER
+    numeric/categorical column lists are passed in - no hard-coded names."""
+    transformers = []
+    if numeric_cols:
+        transformers.append(("num", Pipeline(steps=[
+            ("impute", SimpleImputer(strategy="median")),
+            ("scale", StandardScaler()),
+        ]), numeric_cols))
+    if categorical_cols:
+        transformers.append(("cat", Pipeline(steps=[
+            ("impute", SimpleImputer(strategy="most_frequent")),
+            ("encode", OneHotEncoder(handle_unknown="ignore")),
+        ]), categorical_cols))
+    if not transformers:
+        raise ValueError("No usable numeric or categorical feature columns were provided.")
+    return ColumnTransformer(transformers=transformers)
+
+
+@dataclass
+class GenericModelResult:
+    task: str                 # "classification" or "regression"
+    model_name: str
+    target: str
+    feature_columns: list
+    n_train: int
+    n_test: int
+    metrics: dict
+    positive_label: object = None   # classification only
+    pipeline: object = None
+
+
+def train_generic_classifier(df: pd.DataFrame, target_col: str, feature_cols: list[str],
+                              model_name: str = "Logistic Regression") -> GenericModelResult:
+    """Binary classification only (multiclass targets are rejected by
+    validate_generic_target before this is called, with a clear reason -
+    kept intentionally simple and reliable rather than guessing at
+    one-vs-rest strategies for an arbitrary uploaded dataset)."""
+    working = df[[target_col] + feature_cols].dropna(subset=[target_col])
+    y_raw = working[target_col]
+    classes = sorted(y_raw.unique(), key=str)
+    if len(classes) != 2:
+        raise ValueError(f"train_generic_classifier requires a binary target; '{target_col}' has {len(classes)} classes.")
+    positive_label = classes[-1]  # deterministic (alphabetical/numeric-last), documented to the user in the UI
+    y = (y_raw == positive_label).astype(int)
+    X = working[feature_cols]
+
+    numeric_cols = [c for c in feature_cols if pd.api.types.is_numeric_dtype(df[c])]
+    categorical_cols = [c for c in feature_cols if c not in numeric_cols]
+
+    stratify = y if y.nunique() > 1 and y.value_counts().min() >= 2 else None
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=RANDOM_STATE, stratify=stratify,
+    )
+
+    model_fn = GENERIC_CLASSIFICATION_MODELS.get(model_name, GENERIC_CLASSIFICATION_MODELS["Logistic Regression"])
+    pipeline = Pipeline(steps=[
+        ("preprocess", build_generic_preprocessor(numeric_cols, categorical_cols)),
+        ("classifier", model_fn()),
+    ])
+    pipeline.fit(X_train, y_train)
+    y_pred = pipeline.predict(X_test)
+    y_proba = pipeline.predict_proba(X_test)[:, 1]
+
+    metrics = {
+        "accuracy": float(accuracy_score(y_test, y_pred)),
+        "precision": float(precision_score(y_test, y_pred, zero_division=0)),
+        "recall": float(recall_score(y_test, y_pred, zero_division=0)),
+        "f1": float(f1_score(y_test, y_pred, zero_division=0)),
+        "roc_auc": float(roc_auc_score(y_test, y_proba)) if y_test.nunique() > 1 else None,
+    }
+    return GenericModelResult(
+        task="classification", model_name=model_name, target=target_col, feature_columns=feature_cols,
+        n_train=len(X_train), n_test=len(X_test), metrics=metrics, positive_label=positive_label,
+        pipeline=pipeline,
+    )
+
+
+def train_generic_regressor(df: pd.DataFrame, target_col: str, feature_cols: list[str],
+                             model_name: str = "Linear Regression") -> GenericModelResult:
+    working = df[[target_col] + feature_cols].dropna(subset=[target_col])
+    y = working[target_col].astype(float)
+    X = working[feature_cols]
+
+    numeric_cols = [c for c in feature_cols if pd.api.types.is_numeric_dtype(df[c])]
+    categorical_cols = [c for c in feature_cols if c not in numeric_cols]
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=RANDOM_STATE)
+
+    model_fn = GENERIC_REGRESSION_MODELS.get(model_name, GENERIC_REGRESSION_MODELS["Linear Regression"])
+    pipeline = Pipeline(steps=[
+        ("preprocess", build_generic_preprocessor(numeric_cols, categorical_cols)),
+        ("regressor", model_fn()),
+    ])
+    pipeline.fit(X_train, y_train)
+    y_pred = pipeline.predict(X_test)
+
+    metrics = {
+        "mae": float(mean_absolute_error(y_test, y_pred)),
+        "rmse": float(root_mean_squared_error(y_test, y_pred)),
+        "r2": float(r2_score(y_test, y_pred)),
+    }
+    return GenericModelResult(
+        task="regression", model_name=model_name, target=target_col, feature_columns=feature_cols,
+        n_train=len(X_train), n_test=len(X_test), metrics=metrics, pipeline=pipeline,
+    )
+
+
+@dataclass
+class GenericClusterProfile:
+    cluster_id: int
+    count: int
+    pct_of_total: float
+    numeric_means: dict           # {col: mean} for the numeric feature columns used
+    categorical_modes: dict       # {col: most-common value} for the categorical feature columns used
+
+
+@dataclass
+class GenericSegmentationResult:
+    k: int
+    labels: object
+    elbow_scores: dict
+    silhouette_scores: dict
+    profiles: list
+    pca_df: pd.DataFrame
+    numeric_cols: list
+    categorical_cols: list
+
+
+def run_generic_segmentation(df: pd.DataFrame, numeric_cols: list[str], categorical_cols: list[str],
+                              k: int, k_range: list[int] = CLUSTER_K_RANGE) -> GenericSegmentationResult:
+    """Generic K-Means over WHATEVER numeric/categorical columns the caller
+    selects (after excluding identifiers/target in app.py) - reuses the same
+    calculate_elbow_scores/calculate_silhouette_scores used by the benchmark
+    segmentation, which are already column-agnostic."""
+    feature_df = df[numeric_cols + categorical_cols].copy()
+    preprocessor = build_generic_preprocessor(numeric_cols, categorical_cols)
+    X_transformed = preprocessor.fit_transform(feature_df)
+
+    elbow = calculate_elbow_scores(X_transformed, k_range)
+    silhouette = calculate_silhouette_scores(X_transformed, k_range)
+
+    kmeans = KMeans(n_clusters=k, random_state=RANDOM_STATE, n_init=10)
+    labels = kmeans.fit_predict(X_transformed)
+
+    profiles = []
+    total = len(feature_df)
+    labeled_df = feature_df.copy()
+    labeled_df["_cluster"] = labels
+    for cluster_id in sorted(set(labels)):
+        sub = labeled_df[labeled_df["_cluster"] == cluster_id]
+        numeric_means = {c: round(float(sub[c].mean()), 2) for c in numeric_cols if pd.api.types.is_numeric_dtype(sub[c])}
+        categorical_modes = {}
+        for c in categorical_cols:
+            mode = sub[c].mode()
+            categorical_modes[c] = str(mode.iloc[0]) if not mode.empty else "N/A"
+        profiles.append(GenericClusterProfile(
+            cluster_id=int(cluster_id), count=len(sub), pct_of_total=round(100 * len(sub) / total, 1),
+            numeric_means=numeric_means, categorical_modes=categorical_modes,
+        ))
+
+    pca = PCA(n_components=2, random_state=RANDOM_STATE)
+    coords = pca.fit_transform(X_transformed)
+    pca_df = pd.DataFrame({"pc1": coords[:, 0], "pc2": coords[:, 1], "cluster": labels.astype(str)})
+    for c in (numeric_cols + categorical_cols)[:3]:  # a few original columns for hover context, no identifiers
+        pca_df[c] = df[c].values
+
+    return GenericSegmentationResult(
+        k=k, labels=labels, elbow_scores=elbow, silhouette_scores=silhouette, profiles=profiles,
+        pca_df=pca_df, numeric_cols=numeric_cols, categorical_cols=categorical_cols,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Manual test
 # ---------------------------------------------------------------------------
