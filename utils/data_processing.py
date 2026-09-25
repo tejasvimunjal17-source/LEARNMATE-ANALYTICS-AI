@@ -19,6 +19,7 @@ Nothing here is hard-coded from prior knowledge of the dataset.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -63,6 +64,241 @@ CLASSIFICATION_EXCLUDED = [ID_COLUMN, SENSITIVE_COLUMN, REGRESSION_TARGET, CLASS
 REGRESSION_EXCLUDED = [ID_COLUMN, SENSITIVE_COLUMN, CLASSIFICATION_TARGET, REGRESSION_TARGET]
 
 RANDOM_STATE = 42  # fixed seed used everywhere for reproducibility
+
+# ---------------------------------------------------------------------------
+# GENERIC ARCHITECTURE - upload, validation, profiling, benchmark detection
+# ---------------------------------------------------------------------------
+#
+# Everything above this point is BENCHMARK-SPECIFIC (assumes the campus
+# placement schema) and is UNCHANGED - the benchmark dataset still goes
+# through load_data() / clean_data() / get_classification_data() etc exactly
+# as before. Everything below is GENERIC: it makes no assumption about which
+# columns exist, so it can safely describe ANY structured campus dataset the
+# user uploads, without ever touching the benchmark-specific logic above.
+
+SUPPORTED_UPLOAD_EXTENSIONS = ["csv", "xlsx", "tsv"]
+
+# Identifier-like column NAME patterns (heuristic, not certainty - a column
+# is only treated as an identifier for exclusion purposes if it also has
+# near-unique values; the name alone just raises the suspicion).
+_IDENTIFIER_NAME_PATTERN = re.compile(
+    r"(^id$|_id$|^id_|\bid\b|roll|registration|admission|enroll|student.?id|sl.?no)",
+    re.IGNORECASE,
+)
+
+HIGH_CARDINALITY_RATIO = 0.5   # >50% unique values in an object column
+HIGH_CARDINALITY_MIN_UNIQUE = 30
+
+
+class DatasetLoadError(Exception):
+    """Raised when an uploaded file cannot be read at all (wrong format,
+    corrupted content, unsupported extension, ...)."""
+
+
+def load_dataset_from_upload(uploaded_file) -> pd.DataFrame:
+    """Reads a Streamlit UploadedFile (csv / xlsx / tsv) into a DataFrame.
+    Raises DatasetLoadError with a clear message on any failure - the
+    caller decides how to show that to the user."""
+    name = getattr(uploaded_file, "name", "uploaded file")
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    if ext not in SUPPORTED_UPLOAD_EXTENSIONS:
+        raise DatasetLoadError(
+            f"Unsupported file type '.{ext}'. Supported formats: "
+            f"{', '.join('.' + e for e in SUPPORTED_UPLOAD_EXTENSIONS)}. "
+            f"(.xls is not supported in this environment - please save as .xlsx or .csv.)"
+        )
+    try:
+        if ext == "csv":
+            df = pd.read_csv(uploaded_file)
+        elif ext == "tsv":
+            df = pd.read_csv(uploaded_file, sep="\t")
+        elif ext == "xlsx":
+            df = pd.read_excel(uploaded_file, engine="openpyxl")
+        else:  # pragma: no cover - unreachable given the check above
+            raise DatasetLoadError(f"Unsupported file type '.{ext}'.")
+    except DatasetLoadError:
+        raise
+    except Exception as e:
+        raise DatasetLoadError(f"Could not read '{name}': {e}") from e
+    return df
+
+
+@dataclass
+class DatasetValidationResult:
+    passed: bool
+    issues: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+def validate_dataset(df: pd.DataFrame) -> DatasetValidationResult:
+    """Generic structural validation - does NOT reject a dataset merely for
+    not matching the benchmark schema. Only rejects genuinely unusable
+    input (empty, zero columns, duplicate column names, etc.)."""
+    issues: list[str] = []
+    warnings: list[str] = []
+
+    if df is None:
+        return DatasetValidationResult(passed=False, issues=["No data was loaded."])
+    if df.shape[1] == 0:
+        issues.append("The file has zero columns.")
+    if df.shape[0] == 0:
+        issues.append("The file has zero rows.")
+    if df.shape[1] > 0:
+        dup_cols = df.columns[df.columns.duplicated()].tolist()
+        if dup_cols:
+            issues.append(f"Duplicate column names found: {sorted(set(dup_cols))}.")
+    if not issues:
+        empty_cols = [c for c in df.columns if df[c].isna().all()]
+        if empty_cols:
+            warnings.append(f"These columns are completely empty: {empty_cols}.")
+        high_missing = [c for c in df.columns if df[c].isna().mean() > 0.5]
+        if high_missing:
+            warnings.append(f"These columns are more than 50% missing: {high_missing}.")
+
+    return DatasetValidationResult(passed=(len(issues) == 0), issues=issues, warnings=warnings)
+
+
+@dataclass
+class DatasetProfile:
+    n_rows: int
+    n_cols: int
+    columns: list[str]
+    duplicate_rows: int
+    missing_value_columns: dict          # col -> missing count, only cols with >0
+    numeric_columns: list[str]
+    categorical_columns: list[str]
+    datetime_columns: list[str]
+    identifier_like_columns: list[str]   # heuristic - name pattern AND near-unique values
+    high_cardinality_columns: list[str]  # heuristic - likely free text, not useful as a category
+
+
+def profile_dataset(df: pd.DataFrame) -> DatasetProfile:
+    """Generic column-type detection using pandas dtypes plus conservative
+    NAME + VALUE heuristics. Labeled as detection, not certainty - the UI
+    should present this as a suggestion, and it never renames or drops
+    anything from the actual dataframe."""
+    n_rows = len(df)
+    numeric_cols, categorical_cols, datetime_cols = [], [], []
+    identifier_like, high_cardinality = [], []
+
+    for col in df.columns:
+        series = df[col]
+        if pd.api.types.is_datetime64_any_dtype(series):
+            datetime_cols.append(col)
+            continue
+        if pd.api.types.is_numeric_dtype(series):
+            numeric_cols.append(col)
+        else:
+            # try a conservative datetime heuristic on object columns
+            parsed = pd.to_datetime(series, errors="coerce", format="mixed") if series.notna().any() else series
+            parse_rate = parsed.notna().mean() if series.notna().any() else 0
+            if parse_rate > 0.9 and series.nunique(dropna=True) > 3:
+                datetime_cols.append(col)
+                continue
+            categorical_cols.append(col)
+
+        nunique = series.nunique(dropna=True)
+        name_looks_like_id = bool(_IDENTIFIER_NAME_PATTERN.search(str(col)))
+        near_unique = n_rows > 0 and nunique >= 0.95 * n_rows
+        if name_looks_like_id and near_unique:
+            identifier_like.append(col)
+        elif col in categorical_cols and (
+            nunique >= HIGH_CARDINALITY_MIN_UNIQUE and n_rows > 0 and nunique / n_rows > HIGH_CARDINALITY_RATIO
+        ):
+            high_cardinality.append(col)
+
+    missing_value_columns = {c: int(df[c].isna().sum()) for c in df.columns if df[c].isna().sum() > 0}
+
+    return DatasetProfile(
+        n_rows=n_rows,
+        n_cols=df.shape[1],
+        columns=list(df.columns),
+        duplicate_rows=int(df.duplicated().sum()),
+        missing_value_columns=missing_value_columns,
+        numeric_columns=numeric_cols,
+        categorical_columns=[c for c in categorical_cols if c not in high_cardinality],
+        datetime_columns=datetime_cols,
+        identifier_like_columns=identifier_like,
+        high_cardinality_columns=high_cardinality,
+    )
+
+
+def normalize_column_name(name: str) -> str:
+    """For SEMANTIC MATCHING/detection only - never used to rename the
+    actual dataframe, which always keeps the user's original column names."""
+    return str(name).strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def is_benchmark_schema(df: pd.DataFrame) -> bool:
+    """True only if every benchmark column is present (by normalized name).
+    This is what gates the specialized Stage 1-8 placement functionality -
+    it is deliberately strict (exact column match) rather than a fuzzy
+    semantic guess, so benchmark-specific analytics never silently run on
+    the wrong data."""
+    normalized = {normalize_column_name(c) for c in df.columns}
+    return set(EXPECTED_COLUMNS).issubset(normalized)
+
+
+# Conservative semantic aliases for common campus-dataset concepts. Matching
+# is done against normalize_column_name() output and is intentionally exact
+# (not "contains"), except where noted, to avoid false positives like
+# treating any "...score..." column as an academic score.
+CAMPUS_CONCEPT_ALIASES: dict[str, list[str]] = {
+    "student_id": ["student_id", "sl_no", "roll_no", "roll_number", "registration_number", "enrollment_no"],
+    "gender": ["gender", "sex"],
+    "age": ["age"],
+    "department": ["department", "dept", "branch"],
+    "course": ["course", "program", "programme"],
+    "semester": ["semester", "sem"],
+    "attendance": ["attendance"],
+    "cgpa": ["cgpa", "gpa"],
+    "work_experience": ["workex", "work_experience", "has_experience"],
+    "internship": ["internship"],
+    "specialisation": ["specialisation", "specialization", "major"],
+    "placement_status": ["status", "placement_status", "placed", "placement_result", "placement_outcome"],
+    "salary": ["salary", "ctc", "package"],
+    "company": ["company", "employer", "recruiter"],
+    "job_role": ["job_role", "designation"],
+    "location": ["location", "city"],
+}
+
+
+def detect_semantic_candidates(df: pd.DataFrame) -> dict[str, list[str]]:
+    """Returns {concept: [matching original column names]} for concepts with
+    at least one match. Matching is substring-based on the NORMALIZED name
+    (e.g. an alias 'salary' matches a column literally named 'salary' AND
+    one named 'starting_salary') - still conservative, since every alias is
+    a specific-enough campus/placement term, and ambiguous matches are
+    returned as-is for the UI to let the user choose rather than deciding
+    for them."""
+    candidates: dict[str, list[str]] = {}
+    for concept, aliases in CAMPUS_CONCEPT_ALIASES.items():
+        matches = []
+        for col in df.columns:
+            norm = normalize_column_name(col)
+            if any(alias in norm for alias in aliases):
+                matches.append(col)
+        if matches:
+            candidates[concept] = sorted(set(matches))
+    return candidates
+
+
+def suggest_leakage_columns(feature_columns: list[str], target_column: str) -> list[str]:
+    """Conservative heuristic warning only (Part 11) - flags feature columns
+    whose NAME suggests they represent an outcome that occurs at or after
+    the target (e.g. a 'salary'-like column when predicting a placement-like
+    target). Does not remove anything automatically."""
+    target_norm = normalize_column_name(target_column)
+    is_placement_like_target = any(alias in target_norm for alias in CAMPUS_CONCEPT_ALIASES["placement_status"])
+    suspicious = []
+    if is_placement_like_target:
+        outcome_aliases = set(CAMPUS_CONCEPT_ALIASES["salary"]) | {"company", "job_role", "designation"}
+        for col in feature_columns:
+            col_norm = normalize_column_name(col)
+            if any(alias in col_norm for alias in outcome_aliases):
+                suspicious.append(col)
+    return suspicious
+
 
 # A short, beginner-friendly data dictionary shown in the Data Explorer page.
 DATA_DICTIONARY: dict[str, str] = {
