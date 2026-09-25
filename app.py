@@ -10,6 +10,8 @@ What-If simulator are NOT built yet (Stage 3+).
 Run with:  streamlit run app.py
 """
 
+import re
+
 import pandas as pd
 import streamlit as st
 
@@ -21,6 +23,14 @@ from utils.data_processing import (
     data_quality_report,
     clean_data,
     validate_pipeline,
+    SUPPORTED_UPLOAD_EXTENSIONS,
+    DatasetLoadError,
+    load_dataset_from_upload,
+    validate_dataset,
+    profile_dataset,
+    is_benchmark_schema,
+    detect_semantic_candidates,
+    suggest_leakage_columns,
 )
 from utils.analytics import (
     kpi_summary,
@@ -91,6 +101,13 @@ from utils.ml_models import (
     compare_scenarios,
     simulate_single_numeric_feature,
     simulate_categorical_feature,
+    validate_generic_target,
+    train_generic_classifier,
+    train_generic_regressor,
+    run_generic_segmentation,
+    build_generic_preprocessor,
+    GENERIC_CLASSIFICATION_MODELS,
+    GENERIC_REGRESSION_MODELS,
 )
 from utils.ai_insights import (
     build_evidence,
@@ -100,6 +117,7 @@ from utils.ai_insights import (
     render_response_markdown,
     get_configured_api_key,
     QUICK_QUESTIONS,
+    UNSUPPORTED_FIELD_KEYWORDS,
 )
 
 st.set_page_config(
@@ -154,10 +172,76 @@ st.markdown(
 )
 
 # ---------------------------------------------------------------------------
-# Sidebar navigation
+# Dataset Center - upload a campus dataset, or fall back to the benchmark
 # ---------------------------------------------------------------------------
 st.sidebar.markdown("### \U0001F393 LearnMate Analytics AI")
 st.sidebar.caption("Student Employability & Placement Intelligence Platform")
+
+st.sidebar.markdown("#### \U0001F4C2 Campus Dataset")
+st.sidebar.caption("Upload a CSV or Excel campus dataset and LearnMate Analytics AI will automatically "
+                    "profile the available columns and enable compatible analytics.")
+
+if "uploader_key_version" not in st.session_state:
+    st.session_state["uploader_key_version"] = 0
+
+
+def _safe_load_benchmark() -> pd.DataFrame:
+    try:
+        return load_data()
+    except FileNotFoundError as e:
+        st.error(str(e))
+        st.stop()
+
+
+uploaded_file = st.sidebar.file_uploader(
+    "Upload dataset", type=SUPPORTED_UPLOAD_EXTENSIONS,
+    key=f"dataset_uploader_{st.session_state['uploader_key_version']}",
+    label_visibility="collapsed",
+)
+if st.sidebar.button("\u21BA Reset to Benchmark Dataset", use_container_width=True):
+    st.session_state["uploader_key_version"] += 1
+    st.rerun()
+
+if uploaded_file is not None:
+    try:
+        _candidate_df = load_dataset_from_upload(uploaded_file)
+        _validation_result = validate_dataset(_candidate_df)
+        if _validation_result.passed:
+            raw_df = _candidate_df
+            active_source_name = uploaded_file.name
+            is_uploaded = True
+            for _w in _validation_result.warnings:
+                st.sidebar.warning(_w)
+        else:
+            st.sidebar.error("Could not use this file:\n- " + "\n- ".join(_validation_result.issues))
+            raw_df, active_source_name, is_uploaded = _safe_load_benchmark(), "campus_placement.csv", False
+    except DatasetLoadError as e:
+        st.sidebar.error(str(e))
+        raw_df, active_source_name, is_uploaded = _safe_load_benchmark(), "campus_placement.csv", False
+else:
+    raw_df, active_source_name, is_uploaded = _safe_load_benchmark(), "campus_placement.csv", False
+
+dataset_profile = profile_dataset(raw_df)
+schema_match = is_benchmark_schema(raw_df)
+
+st.sidebar.divider()
+_mode_label = "Uploaded Dataset" if is_uploaded else "Benchmark Dataset"
+st.sidebar.markdown(
+    f"\U0001F7E2 **Active Dataset**\n\n{active_source_name}\n\n"
+    f"{dataset_profile.n_rows:,} rows \u00d7 {dataset_profile.n_cols} columns\n\n{_mode_label}"
+)
+if schema_match:
+    st.sidebar.caption("Campus Placement Mode active - specialized placement/salary analytics enabled.")
+else:
+    st.sidebar.caption(
+        "Generic Mode - adaptive analytics for campus/student datasets. Specialized placement/salary "
+        "pages require the benchmark-style columns; some datasets may need manual target selection."
+    )
+st.sidebar.divider()
+
+# ---------------------------------------------------------------------------
+# Sidebar navigation
+# ---------------------------------------------------------------------------
 st.sidebar.caption("ANALYTICS")
 page = st.sidebar.radio(
     "Navigate",
@@ -166,6 +250,7 @@ page = st.sidebar.radio(
         "\U0001F9E9 Student Segmentation",
         "\U0001F9E0 AI Insight Copilot",
         "\U0001F3AF What-If Simulator",
+        "\U0001F9EC Predictive Analysis",
         "\U0001F916 Placement Prediction", "\U0001F916 Salary Prediction",
         "\U0001F916 Model Evaluation",
         "\U0001F4D8 Project Summary",
@@ -175,17 +260,20 @@ page = st.sidebar.radio(
 st.sidebar.divider()
 
 # ---------------------------------------------------------------------------
-# Load + clean data once (shared by every page)
+# Clean data once (shared by every page). Benchmark-specific cleaning /
+# leakage validation only applies when the active dataset actually matches
+# the benchmark schema - a generic upload gets a light, assumption-free
+# clean instead (duplicates dropped, nothing else assumed about columns).
 # ---------------------------------------------------------------------------
-try:
-    raw_df = load_data()
-except FileNotFoundError as e:
-    st.error(str(e))
-    st.stop()
-
-quality = data_quality_report(raw_df)
-cleaned_df, cleaning_log = clean_data(raw_df)
-validation = validate_pipeline(raw_df)
+if schema_match:
+    quality = data_quality_report(raw_df)
+    cleaned_df, cleaning_log = clean_data(raw_df)
+    validation = validate_pipeline(raw_df)
+else:
+    quality = None
+    cleaned_df = raw_df.drop_duplicates().reset_index(drop=True)
+    cleaning_log = None
+    validation = None
 
 
 @st.cache_resource
@@ -221,14 +309,18 @@ def get_copilot_evidence(_df, _cls_results, _reg_results, _seg_diagnostics):
     return build_evidence(_df, _cls_results, _reg_results, _seg_diagnostics)
 
 
-CATEGORY_OPTIONS = {
-    col: sorted(cleaned_df[col].dropna().unique().tolist())
-    for col in ["ssc_b", "hsc_b", "hsc_s", "degree_t", "workex", "specialisation"]
-}
-NUMERIC_RANGES = {
-    col: (float(cleaned_df[col].min()), float(cleaned_df[col].max()), float(cleaned_df[col].median()))
-    for col in ["ssc_p", "hsc_p", "degree_p", "etest_p", "mba_p"]
-}
+if schema_match:
+    CATEGORY_OPTIONS = {
+        col: sorted(cleaned_df[col].dropna().unique().tolist())
+        for col in ["ssc_b", "hsc_b", "hsc_s", "degree_t", "workex", "specialisation"]
+    }
+    NUMERIC_RANGES = {
+        col: (float(cleaned_df[col].min()), float(cleaned_df[col].max()), float(cleaned_df[col].median()))
+        for col in ["ssc_p", "hsc_p", "degree_p", "etest_p", "mba_p"]
+    }
+else:
+    CATEGORY_OPTIONS = {}
+    NUMERIC_RANGES = {}
 
 
 def insight_card(fact: str, interpretation: str) -> None:
@@ -253,11 +345,29 @@ def business_insight_card(bi) -> None:
     )
 
 
+def benchmark_only_notice(page_name: str, required_cols_hint: str = "") -> None:
+    """Shown instead of crashing when a benchmark-specific page is opened
+    while a non-benchmark dataset is active."""
+    st.info(
+        f"**{page_name} is available for the benchmark-style campus placement schema.**\n\n"
+        f"The active dataset does not contain the required columns"
+        + (f" ({required_cols_hint})" if required_cols_hint else "")
+        + f". Try **Data Explorer** for a generic profile of this dataset, "
+          f"**Exploratory Data Analysis** for adaptive charts, **Predictive Analysis** for a "
+          f"target-driven generic model, or **Reset to Benchmark Dataset** in the sidebar to "
+          f"restore the full placement-intelligence walkthrough."
+    )
+
+
 # ---------------------------------------------------------------------------
 # PAGE: OVERVIEW
 # ---------------------------------------------------------------------------
 
 def render_overview() -> None:
+    if not schema_match:
+        st.title("Overview")
+        benchmark_only_notice("The Overview dashboard", "e.g. status, salary, ssc_p, workex")
+        return
     st.markdown('<span class="lm-badge">LIVE DATA - CALCULATED FROM CSV</span>', unsafe_allow_html=True)
     st.title("Overview")
     st.caption("From Student Data to Employability Intelligence")
@@ -340,36 +450,78 @@ def render_overview() -> None:
 
 def render_data_explorer() -> None:
     st.title("\U0001F4CA Data Explorer")
-    st.caption("Every number below is calculated live from data/campus_placement.csv.")
+    st.caption(f"Active dataset: **{active_source_name}** - every number below is calculated live from it.")
 
+    # --- Generic profile: works for ANY valid tabular dataset ---------------
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Rows", quality.n_rows)
-    c2.metric("Columns", quality.n_cols)
-    c3.metric("Duplicate rows", quality.duplicate_rows)
-    c4.metric("Schema matches expected", "Yes" if quality.schema_matches_expected else "No")
+    c1.metric("Rows", dataset_profile.n_rows)
+    c2.metric("Columns", dataset_profile.n_cols)
+    c3.metric("Duplicate rows", dataset_profile.duplicate_rows)
+    c4.metric("Benchmark schema match", "Yes" if schema_match else "No")
 
     st.divider()
     st.subheader("Dataset preview")
     st.dataframe(raw_df.head(15), use_container_width=True)
 
     st.divider()
-    st.subheader("Columns & data types")
+    st.subheader("Detected column types")
+    st.caption("Detected / inferred from column names and data characteristics - a heuristic, not a certainty.")
+    dc1, dc2 = st.columns(2)
+    with dc1:
+        st.markdown(f"**Numeric ({len(dataset_profile.numeric_columns)}):** "
+                     + (", ".join(dataset_profile.numeric_columns) or "none"))
+        st.markdown(f"**Categorical ({len(dataset_profile.categorical_columns)}):** "
+                     + (", ".join(dataset_profile.categorical_columns) or "none"))
+    with dc2:
+        st.markdown(f"**Datetime-like ({len(dataset_profile.datetime_columns)}):** "
+                     + (", ".join(dataset_profile.datetime_columns) or "none"))
+        st.markdown(f"**Identifier-like ({len(dataset_profile.identifier_like_columns)}):** "
+                     + (", ".join(dataset_profile.identifier_like_columns) or "none"))
+        st.markdown(f"**High-cardinality/text ({len(dataset_profile.high_cardinality_columns)}):** "
+                     + (", ".join(dataset_profile.high_cardinality_columns) or "none"))
+
+    if dataset_profile.missing_value_columns:
+        st.markdown("**Missing values:** " + ", ".join(
+            f"{c} ({n})" for c, n in dataset_profile.missing_value_columns.items()))
+    else:
+        st.markdown("**Missing values:** none")
+
+    semantic = detect_semantic_candidates(raw_df)
+    if semantic:
+        st.divider()
+        st.subheader("Detected campus/student concepts")
+        st.caption("Conservative name-based matching, shown for your review - never used to silently pick a target.")
+        for concept, cols in semantic.items():
+            st.write(f"- **{concept.replace('_', ' ').title()}:** {', '.join(cols)}")
+
+    # --- Benchmark-specific sections: only when the schema actually matches -
+    if not schema_match:
+        st.divider()
+        st.info(
+            "This dataset does not match the benchmark campus-placement schema, so the specialized "
+            "cleaning-summary and leakage-validation checks below (built specifically for that schema) "
+            "are not shown. Use **Predictive Analysis** or **Student Segmentation** for adaptive "
+            "analytics on this dataset."
+        )
+        return
+
+    quality_local = quality
+    st.divider()
+    st.subheader("Columns & data types (benchmark schema)")
     schema_df = pd.DataFrame({
-        "column": quality.columns,
-        "dtype": [quality.dtypes[c] for c in quality.columns],
-        "missing_values": [quality.missing_counts[c] for c in quality.columns],
-        "description": [DATA_DICTIONARY.get(c, "") for c in quality.columns],
+        "column": quality_local.columns,
+        "dtype": [quality_local.dtypes[c] for c in quality_local.columns],
+        "missing_values": [quality_local.missing_counts[c] for c in quality_local.columns],
+        "description": [DATA_DICTIONARY.get(c, "") for c in quality_local.columns],
     })
     st.dataframe(schema_df, use_container_width=True, hide_index=True)
-    st.markdown(f"**Numeric columns:** {', '.join(quality.numeric_columns) or 'none'}")
-    st.markdown(f"**Categorical columns:** {', '.join(quality.categorical_columns) or 'none'}")
 
     st.divider()
     st.subheader("Data Quality")
-    total_missing = sum(quality.missing_counts.values())
+    total_missing = sum(quality_local.missing_counts.values())
     st.write(f"Total missing values across all columns: **{total_missing}**")
     missing_df = pd.DataFrame(
-        [(c, n) for c, n in quality.missing_counts.items() if n > 0],
+        [(c, n) for c, n in quality_local.missing_counts.items() if n > 0],
         columns=["column", "missing_count"],
     )
     if not missing_df.empty:
@@ -405,7 +557,101 @@ def render_data_explorer() -> None:
 # PAGE: EXPLORATORY DATA ANALYSIS
 # ---------------------------------------------------------------------------
 
+def render_generic_eda() -> None:
+    """Adaptive EDA for a non-benchmark dataset: works from whatever numeric/
+    categorical columns profile_dataset() actually found - never assumes
+    ssc_p/hsc_p/degree_p/etest_p/mba_p/status/salary exist."""
+    st.title("\U0001F50E Exploratory Data Analysis")
+    st.caption(f"Adaptive analysis for **{active_source_name}** - charts below use whatever numeric/"
+               f"categorical columns were detected in this dataset.")
+
+    numeric_cols = dataset_profile.numeric_columns
+    categorical_cols = [c for c in dataset_profile.categorical_columns
+                         if c not in dataset_profile.identifier_like_columns]
+
+    tab_a, tab_b, tab_c = st.tabs(["Distributions", "Relationships", "Group Summaries"])
+
+    with tab_a:
+        if numeric_cols:
+            st.markdown("##### Numeric distribution")
+            n1, n2 = st.columns([2, 1])
+            with n1:
+                metric = st.selectbox("Column", numeric_cols, key="generic_eda_numeric")
+            with n2:
+                chart_type = st.radio("Chart type", CHART_TYPE_OPTIONS, horizontal=True, key="generic_eda_numeric_type")
+            fig = numeric_distribution_chart(cleaned_df, column=metric, title=f"{metric} Distribution", chart_type=chart_type)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No numeric columns were detected in this dataset.")
+
+        if categorical_cols:
+            st.markdown("##### Categorical distribution")
+            cat_col = st.selectbox("Column", categorical_cols, key="generic_eda_categorical")
+            counts = cleaned_df[cat_col].value_counts().reset_index()
+            counts.columns = [cat_col, "count"]
+            st.plotly_chart(bar_chart(counts, x=cat_col, y="count", title=f"{cat_col} Frequency"),
+                             use_container_width=True)
+        else:
+            st.info("No usable categorical columns were detected in this dataset.")
+
+    with tab_b:
+        if len(numeric_cols) >= 2:
+            st.markdown("##### Correlation heatmap (numeric columns)")
+            corr = correlation_matrix(cleaned_df, numeric_cols)
+            st.plotly_chart(heatmap_chart(corr, "Numeric Column Correlations"), use_container_width=True)
+
+            st.markdown("##### Scatter plot")
+            s1, s2, s3 = st.columns(3)
+            with s1:
+                x_col = st.selectbox("X axis", numeric_cols, index=0, key="generic_eda_x")
+            with s2:
+                y_col = st.selectbox("Y axis", numeric_cols, index=min(1, len(numeric_cols) - 1), key="generic_eda_y")
+            with s3:
+                color_col = st.selectbox("Color by (optional)", ["(none)"] + categorical_cols, key="generic_eda_color")
+            st.plotly_chart(
+                scatter_chart(cleaned_df, x=x_col, y=y_col, title=f"{x_col} vs {y_col}",
+                              color=None if color_col == "(none)" else color_col),
+                use_container_width=True,
+            )
+        else:
+            st.info("Need at least 2 numeric columns for correlation/relationship analysis.")
+
+        if numeric_cols and categorical_cols:
+            st.markdown("##### Box plot by category")
+            b1, b2 = st.columns(2)
+            with b1:
+                box_num = st.selectbox("Numeric column", numeric_cols, key="generic_eda_box_num")
+            with b2:
+                box_cat = st.selectbox("Group by", categorical_cols, key="generic_eda_box_cat")
+            st.plotly_chart(box_chart(cleaned_df, x=box_cat, y=box_num, title=f"{box_num} by {box_cat}"),
+                             use_container_width=True)
+
+    with tab_c:
+        if numeric_cols and categorical_cols:
+            g1, g2 = st.columns(2)
+            with g1:
+                group_col = st.selectbox("Group by", categorical_cols, key="generic_eda_group_col")
+            with g2:
+                agg_col = st.selectbox("Summarize", numeric_cols, key="generic_eda_agg_col")
+            summary = cleaned_df.groupby(group_col)[agg_col].agg(["count", "mean", "median"]).reset_index()
+            summary.columns = [group_col, "count", "mean", "median"]
+            st.dataframe(summary, use_container_width=True, hide_index=True)
+            st.plotly_chart(bar_chart(summary, x=group_col, y="mean", title=f"Average {agg_col} by {group_col}"),
+                             use_container_width=True)
+        else:
+            st.info("Need at least one numeric and one categorical column for group summaries.")
+
+    st.divider()
+    st.caption(
+        "This is generic exploratory analysis - it does not assume a placement/salary schema. "
+        "Specialized placement/salary EDA is available when the benchmark-style columns are present."
+    )
+
+
 def render_eda() -> None:
+    if not schema_match:
+        render_generic_eda()
+        return
     st.title("\U0001F50E Exploratory Data Analysis")
 
     tab_a, tab_b, tab_c, tab_d = st.tabs(
@@ -554,6 +800,10 @@ def render_eda() -> None:
 
 def render_model_evaluation() -> None:
     st.title("\U0001F916 Model Evaluation")
+    if not schema_match:
+        benchmark_only_notice("Model Evaluation (Logistic Regression / Decision Tree / regression models)",
+                               "e.g. status, salary, ssc_p, hsc_p, degree_p, etest_p, mba_p")
+        return
     st.info(
         f"Dataset size: {quality.n_rows} records. Model metrics should be interpreted as an "
         f"educational demonstration and may vary with different train/test splits. "
@@ -662,6 +912,10 @@ def render_model_evaluation() -> None:
 
 def render_placement_prediction() -> None:
     st.title("\U0001F916 Placement Prediction")
+    if not schema_match:
+        benchmark_only_notice("Placement Prediction",
+                               "e.g. status, ssc_p, hsc_p, degree_p, etest_p, mba_p, workex")
+        return
     st.caption(
         "Enter a student's profile below. Predictions come from models trained on the "
         f"{quality.n_rows}-record dataset and are a model estimate, not a guarantee of an "
@@ -714,6 +968,9 @@ def render_placement_prediction() -> None:
 
 def render_salary_prediction() -> None:
     st.title("\U0001F916 Salary Prediction")
+    if not schema_match:
+        benchmark_only_notice("Salary Prediction", "e.g. salary, status, ssc_p, hsc_p, degree_p, etest_p, mba_p")
+        return
     st.warning(SMALL_SAMPLE_WARNING)
 
     reg_results = get_regression_results(cleaned_df)
@@ -814,7 +1071,106 @@ def render_salary_prediction() -> None:
 # PAGE: STUDENT SEGMENTATION
 # ---------------------------------------------------------------------------
 
+def render_generic_segmentation() -> None:
+    """Generic K-Means for a non-benchmark dataset: user picks the feature
+    columns (identifiers pre-excluded by default), reusing the same
+    Elbow/Silhouette diagnostic approach as the benchmark segmentation."""
+    st.title("\U0001F9E9 Student Segmentation")
+    st.caption(f"Discover profiles in **{active_source_name}** through unsupervised learning.")
+    st.info(
+        f"This segmentation is exploratory. The active dataset has {dataset_profile.n_rows} rows, so "
+        f"cluster profiles may change with a larger or different sample. K-Means is sensitive to "
+        f"feature selection, scaling, the number of clusters chosen, and dataset composition."
+    )
+
+    usable_numeric = [c for c in dataset_profile.numeric_columns if c not in dataset_profile.identifier_like_columns]
+    usable_categorical = [c for c in dataset_profile.categorical_columns
+                           if c not in dataset_profile.identifier_like_columns
+                           and c not in dataset_profile.high_cardinality_columns]
+
+    if len(usable_numeric) + len(usable_categorical) < 2:
+        st.warning(
+            "Not enough usable features for clustering after excluding likely identifier/high-cardinality "
+            "columns. Clustering needs at least 2 usable numeric or categorical columns."
+        )
+        return
+
+    st.markdown('<h3 class="lm-section-title">Select features</h3>', unsafe_allow_html=True)
+    f1, f2 = st.columns(2)
+    with f1:
+        chosen_numeric = st.multiselect("Numeric features", usable_numeric, default=usable_numeric,
+                                         key="generic_seg_numeric")
+    with f2:
+        chosen_categorical = st.multiselect("Categorical features", usable_categorical, default=usable_categorical,
+                                             key="generic_seg_categorical")
+
+    if len(chosen_numeric) + len(chosen_categorical) < 2:
+        st.warning("Select at least 2 features in total to run clustering.")
+        return
+
+    k_range = CLUSTER_K_RANGE
+    diag_key = f"generic_seg_diag_{tuple(chosen_numeric)}_{tuple(chosen_categorical)}"
+
+    @st.cache_resource
+    def _get_generic_diag(_df, num_cols, cat_cols):
+        X_raw = _df[num_cols + cat_cols]
+        preproc = build_generic_preprocessor(num_cols, cat_cols)
+        X_t = preproc.fit_transform(X_raw)
+        from utils.ml_models import calculate_elbow_scores, calculate_silhouette_scores
+        return X_t, calculate_elbow_scores(X_t, k_range), calculate_silhouette_scores(X_t, k_range)
+
+    X_transformed, elbow_scores, silhouette_scores = _get_generic_diag(cleaned_df, chosen_numeric, chosen_categorical)
+    valid_silhouette = {k: v for k, v in silhouette_scores.items() if v is not None}
+    suggested_k = max(valid_silhouette, key=valid_silhouette.get) if valid_silhouette else k_range[0]
+
+    st.markdown('<h3 class="lm-section-title">K diagnostics</h3>', unsafe_allow_html=True)
+    d1, d2 = st.columns(2)
+    with d1:
+        st.plotly_chart(plot_elbow_curve(elbow_scores, highlighted_k=suggested_k), use_container_width=True)
+    with d2:
+        st.plotly_chart(plot_silhouette_scores(silhouette_scores, highlighted_k=suggested_k), use_container_width=True)
+
+    k = st.select_slider("Select number of clusters", options=k_range, value=suggested_k, key="generic_seg_k")
+    seg = run_generic_segmentation(cleaned_df, chosen_numeric, chosen_categorical, k=k, k_range=k_range)
+
+    st.divider()
+    st.markdown('<h3 class="lm-section-title">Cluster overview</h3>', unsafe_allow_html=True)
+    sizes = [p.count for p in seg.profiles]
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Number of clusters", seg.k)
+    c2.metric("Total records", sum(sizes))
+    c3.metric("Largest cluster", max(sizes))
+    c4.metric("Smallest cluster", min(sizes))
+    st.caption("Cluster numbers are algorithm-generated identifiers and do not represent rankings.")
+
+    st.plotly_chart(plot_cluster_distribution(seg.profiles), use_container_width=True)
+
+    st.markdown('<h3 class="lm-section-title">Cluster profiles</h3>', unsafe_allow_html=True)
+    for p in seg.profiles:
+        with st.expander(f"Cluster {p.cluster_id} (n={p.count}, {p.pct_of_total}%)"):
+            if p.numeric_means:
+                st.markdown("**Numeric feature averages:**")
+                st.markdown("\n".join(f"- {c}: {v}" for c, v in p.numeric_means.items()))
+            if p.categorical_modes:
+                st.markdown("**Most common category per feature:**")
+                st.markdown("\n".join(f"- {c}: {v}" for c, v in p.categorical_modes.items()))
+
+    st.markdown('<h3 class="lm-section-title">2D cluster visualization (PCA)</h3>', unsafe_allow_html=True)
+    st.plotly_chart(
+        scatter_chart(seg.pca_df, x="pc1", y="pc2", color="cluster", title="Clusters (PCA 2D Projection)"),
+        use_container_width=True,
+    )
+    st.caption(
+        "Clusters are formed in the full preprocessed feature space; PCA is used only to visualize the "
+        "multidimensional data in two dimensions. Clustering is exploratory and does not establish "
+        "causal groups."
+    )
+
+
 def render_student_segmentation() -> None:
+    if not schema_match:
+        render_generic_segmentation()
+        return
     st.title("\U0001F9E9 Student Segmentation")
     st.caption("Discover student profiles through unsupervised learning.")
     st.info(SEGMENTATION_SMALL_SAMPLE_WARNING)
@@ -940,9 +1296,69 @@ def render_student_segmentation() -> None:
 # PAGE: AI INSIGHT COPILOT
 # ---------------------------------------------------------------------------
 
+def generic_copilot_answer(question: str, df: pd.DataFrame, profile) -> dict:
+    """A small, honest generic Q&A engine for a non-benchmark dataset - only
+    ever describes the ACTIVE dataframe, never benchmark numbers. Reuses the
+    same unsupported-field keyword guard as the benchmark Copilot so
+    questions about information the dataset doesn't contain (e.g. company)
+    get the same safe non-fabricating response."""
+    q = question.lower()
+    for kw in UNSUPPORTED_FIELD_KEYWORDS:
+        if re.search(r"\b" + re.escape(kw) + r"\b", q):
+            return {"answer": f"The uploaded dataset does not contain {kw}-level information, so this "
+                               f"cannot be determined from the available data.", "source": "fallback"}
+
+    if any(w in q for w in ["how many row", "how many record", "how many student", "dataset size"]):
+        return {"answer": f"The active dataset ({active_source_name}) has {profile.n_rows} rows and "
+                           f"{profile.n_cols} columns.", "source": "fallback"}
+    if "duplicate" in q:
+        return {"answer": f"This dataset has {profile.duplicate_rows} duplicate row(s).", "source": "fallback"}
+    if "missing" in q:
+        if profile.missing_value_columns:
+            txt = ", ".join(f"{c}: {n}" for c, n in profile.missing_value_columns.items())
+            return {"answer": f"Missing values by column: {txt}.", "source": "fallback"}
+        return {"answer": "No missing values were detected in this dataset.", "source": "fallback"}
+    if any(w in q for w in ["average", "mean"]) and profile.numeric_columns:
+        means = {c: round(float(df[c].mean()), 2) for c in profile.numeric_columns}
+        return {"answer": "Numeric column averages: " + ", ".join(f"{c}={v}" for c, v in means.items()),
+                "source": "fallback"}
+    if "numeric" in q:
+        return {"answer": "Numeric columns detected: " + (", ".join(profile.numeric_columns) or "none"),
+                "source": "fallback"}
+    if "categor" in q:
+        return {"answer": "Categorical columns detected: " + (", ".join(profile.categorical_columns) or "none"),
+                "source": "fallback"}
+    return {
+        "answer": ("The uploaded dataset does not contain the information required to answer this "
+                   "question, or this Copilot's generic mode does not recognize the phrasing yet. Try "
+                   "asking about row/column counts, missing values, duplicates, or numeric/categorical "
+                   "columns - or use Predictive Analysis / Student Segmentation for modelling questions."),
+        "source": "fallback",
+    }
+
+
 def render_ai_copilot() -> None:
     st.title("\U0001F9E0 AI Insight Copilot")
     st.caption("Ask questions about your student data, models, and insights.")
+
+    if not schema_match:
+        st.info(
+            "**Generic Mode** - the active dataset does not match the benchmark placement schema, so "
+            "the Copilot answers only from THIS dataset's own profile (never from the benchmark "
+            "dataset's numbers). Ask about row/column counts, missing values, duplicates, or numeric/"
+            "categorical columns."
+        )
+        st.markdown('<span class="lm-badge">GROUNDED IN ACTIVE DATASET</span>', unsafe_allow_html=True)
+        with st.form("generic_copilot_form"):
+            question = st.text_input("Your question", placeholder="e.g. How many rows and columns does this dataset have?",
+                                      label_visibility="collapsed")
+            asked = st.form_submit_button("Ask")
+        if asked and question.strip():
+            response = generic_copilot_answer(question.strip(), cleaned_df, dataset_profile)
+            st.divider()
+            st.caption("Answer source: Fallback engine (deterministic, no API used)")
+            st.markdown(f"### Answer\n{response['answer']}")
+        return
 
     cls_results = get_classification_results(cleaned_df)
     reg_results = get_regression_results(cleaned_df)
@@ -1021,6 +1437,15 @@ def render_ai_copilot() -> None:
 
 def render_whatif_simulator() -> None:
     st.title("\U0001F3AF What-If Simulator")
+    if not schema_match:
+        st.info(
+            "**What-if simulation is available when a compatible classification target and trained "
+            "predictive model are available.** The active dataset does not match the benchmark "
+            "placement schema (e.g. status, ssc_p, hsc_p, degree_p, etest_p, mba_p, workex), so the "
+            "existing trained classification pipeline cannot be reused here. Try **Predictive Analysis** "
+            "to train a generic model on this dataset, or **Reset to Benchmark Dataset** in the sidebar."
+        )
+        return
     st.caption("Explore how hypothetical student profiles change model-estimated placement probabilities.")
     st.info(WHATIF_DATASET_SIZE_NOTE)
 
@@ -1144,7 +1569,49 @@ def render_whatif_simulator() -> None:
 # PAGE: PROJECT SUMMARY
 # ---------------------------------------------------------------------------
 
+def render_generic_project_summary() -> None:
+    st.title("\U0001F4D8 Project Summary")
+    st.caption("Dataset-Adaptive Campus Analytics Platform")
+    st.markdown(
+        "LearnMate Analytics AI is a **dataset-adaptive campus analytics platform**. It ships with a "
+        "specialized, verified placement-intelligence walkthrough for the bundled campus-placement "
+        "benchmark dataset, and adapts to other structured campus/student datasets with generic "
+        "profiling, exploratory analysis, predictive modelling, and clustering."
+    )
+    st.divider()
+    st.markdown('<h3 class="lm-section-title">Active dataset</h3>', unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Source", active_source_name)
+    c2.metric("Rows", dataset_profile.n_rows)
+    c3.metric("Columns", dataset_profile.n_cols)
+    c4.metric("Mode", "Generic")
+    st.markdown(
+        f"- Numeric columns: {', '.join(dataset_profile.numeric_columns) or 'none'}\n"
+        f"- Categorical columns: {', '.join(dataset_profile.categorical_columns) or 'none'}\n"
+        f"- Identifier-like columns (excluded from modelling by default): "
+        f"{', '.join(dataset_profile.identifier_like_columns) or 'none'}\n"
+        f"- Duplicate rows: {dataset_profile.duplicate_rows}\n"
+        f"- Missing values: {sum(dataset_profile.missing_value_columns.values())} across "
+        f"{len(dataset_profile.missing_value_columns)} column(s)"
+    )
+    semantic = detect_semantic_candidates(raw_df)
+    if semantic:
+        st.markdown("**Detected campus/student concepts (heuristic, for your review):**")
+        for concept, cols in semantic.items():
+            st.write(f"- {concept.replace('_', ' ').title()}: {', '.join(cols)}")
+    st.divider()
+    st.warning(
+        "This dataset does not match the benchmark campus-placement schema, so the specialized "
+        "Stage 1-7 placement/salary report is not shown here. Use **Predictive Analysis** for "
+        "target-driven classification/regression, or **Student Segmentation** for clustering on this "
+        "dataset. Reset to the benchmark dataset (sidebar) to see the full verified project summary."
+    )
+
+
 def render_project_summary() -> None:
+    if not schema_match:
+        render_generic_project_summary()
+        return
     st.title("\U0001F4D8 Project Summary")
     st.caption("From Student Data to Employability Intelligence")
 
@@ -1315,6 +1782,95 @@ def render_project_summary() -> None:
     )
 
 
+def render_predictive_analysis() -> None:
+    """Generic, target-driven predictive workflow (Part 10): the user picks
+    a target column and a task, the app validates suitability, excludes
+    obvious identifiers, warns about likely leakage columns, then trains
+    the appropriate model(s) live. Works for ANY dataset, including the
+    benchmark one (as an additional, explicit-choice option alongside the
+    fixed Placement/Salary Prediction pages)."""
+    st.title("\U0001F9EC Predictive Analysis")
+    st.caption(f"Target-driven classification/regression for **{active_source_name}**.")
+    st.info(
+        "Select a target column and a task below. Only columns that pass a basic suitability check "
+        "will train - this never guesses a target for you."
+    )
+
+    all_cols = list(cleaned_df.columns)
+    semantic = detect_semantic_candidates(raw_df)
+    hint_cols = set()
+    for concept in ("placement_status", "salary"):
+        hint_cols.update(semantic.get(concept, []))
+    if hint_cols:
+        st.caption(f"Possible target detected (heuristic, not certain): {', '.join(sorted(hint_cols))}")
+
+    s1, s2 = st.columns(2)
+    with s1:
+        target_col = st.selectbox("Target column", all_cols, key="pred_target")
+    with s2:
+        task = st.selectbox("Task", ["Classification", "Regression"], key="pred_task")
+    task_key = "classification" if task == "Classification" else "regression"
+
+    validation_result = validate_generic_target(cleaned_df, target_col, task_key)
+    if not validation_result.ok:
+        st.error(f"This target/task combination is not usable: {validation_result.reason}")
+        return
+
+    candidate_features = [
+        c for c in all_cols
+        if c != target_col and c not in dataset_profile.identifier_like_columns
+    ]
+    default_features = [c for c in candidate_features if c not in dataset_profile.high_cardinality_columns]
+    feature_cols = st.multiselect("Feature columns (identifiers pre-excluded)", candidate_features,
+                                   default=default_features, key="pred_features")
+    if not feature_cols:
+        st.warning("Select at least one feature column.")
+        return
+
+    leakage_warning = suggest_leakage_columns(feature_cols, target_col)
+    if leakage_warning:
+        st.warning(
+            f"These selected feature(s) may contain information that occurs after the target outcome "
+            f"and could cause data leakage: {', '.join(leakage_warning)}. Review before including them."
+        )
+
+    model_options = list(GENERIC_CLASSIFICATION_MODELS.keys()) if task_key == "classification" \
+        else list(GENERIC_REGRESSION_MODELS.keys())
+    model_name = st.selectbox("Model", model_options, key="pred_model")
+
+    if st.button("Train model", key="pred_train_button"):
+        try:
+            if task_key == "classification":
+                result = train_generic_classifier(cleaned_df, target_col, feature_cols, model_name)
+                st.success(f"Trained {model_name} on {result.n_train} rows (tested on {result.n_test}). "
+                           f"Positive class: '{result.positive_label}'.")
+                m1, m2, m3, m4, m5 = st.columns(5)
+                m1.metric("Accuracy", f"{result.metrics['accuracy']:.3f}")
+                m2.metric("Precision", f"{result.metrics['precision']:.3f}")
+                m3.metric("Recall", f"{result.metrics['recall']:.3f}")
+                m4.metric("F1", f"{result.metrics['f1']:.3f}")
+                m5.metric("ROC-AUC", f"{result.metrics['roc_auc']:.3f}" if result.metrics["roc_auc"] is not None else "N/A")
+            else:
+                result = train_generic_regressor(cleaned_df, target_col, feature_cols, model_name)
+                st.success(f"Trained {model_name} on {result.n_train} rows (tested on {result.n_test}).")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("MAE", f"{result.metrics['mae']:,.2f}")
+                m2.metric("RMSE", f"{result.metrics['rmse']:,.2f}")
+                m3.metric("R\u00b2", f"{result.metrics['r2']:.3f}")
+                if result.metrics["r2"] < 0:
+                    st.caption(
+                        "A negative R\u00b2 means this model did not outperform a simple mean-value "
+                        "baseline on this test split - a genuine result, not an error."
+                    )
+            st.caption(
+                "These results come from a single 80/20 train/test split (random_state=42) on this "
+                "dataset and should be treated as an exploratory, educational result - not a "
+                "production benchmark."
+            )
+        except Exception as e:
+            st.error(f"Could not train this model: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------------
@@ -1331,6 +1887,8 @@ elif page == "\U0001F9E0 AI Insight Copilot":
     render_ai_copilot()
 elif page == "\U0001F3AF What-If Simulator":
     render_whatif_simulator()
+elif page == "\U0001F9EC Predictive Analysis":
+    render_predictive_analysis()
 elif page == "\U0001F916 Placement Prediction":
     render_placement_prediction()
 elif page == "\U0001F916 Salary Prediction":
