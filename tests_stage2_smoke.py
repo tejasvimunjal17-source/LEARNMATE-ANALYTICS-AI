@@ -79,6 +79,7 @@ def make_streamlit_stub(sidebar_choice: str, selectbox_value: str = "ssc_p",
     st_mod.form_submit_button.return_value = False  # don't exercise the predict/ask branch here
     st_mod.button.return_value = False  # no quick-question card / train button "clicked" by default
     st_mod.text_input.return_value = ""
+    st_mod.chat_input.return_value = None  # no message typed - don't exercise the chatbot send path here
     st_mod.secrets = MagicMock()
     st_mod.secrets.get.return_value = None  # simulate no AI provider key configured
     st_mod.cache_resource.side_effect = lambda f: f  # pass-through decorator: run the REAL function
@@ -135,6 +136,7 @@ BENCHMARK_PAGES = [
     "\U0001F916 Placement Prediction", "\U0001F916 Salary Prediction",
     "\U0001F916 Model Evaluation",
     "\U0001F4D8 Project Summary",
+    "\U0001F1EE\U0001F1F3 Government Services",
 ]
 
 # Generic (non-benchmark) pages only - the benchmark-only pages are expected
@@ -149,6 +151,7 @@ GENERIC_PAGES = [
     "\U0001F916 Placement Prediction", "\U0001F916 Salary Prediction",
     "\U0001F916 Model Evaluation",
     "\U0001F4D8 Project Summary",
+    "\U0001F1EE\U0001F1F3 Government Services",
 ]
 
 
