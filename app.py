@@ -119,6 +119,8 @@ from utils.ai_insights import (
     QUICK_QUESTIONS,
     UNSUPPORTED_FIELD_KEYWORDS,
 )
+from utils.government_services import render_government_services_page
+from utils.chatbot_ui import render_chatbot_panel
 
 st.set_page_config(
     page_title="LearnMate Analytics AI",
@@ -127,44 +129,124 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------------
-# Premium visual theme (CSS)
+# Premium visual theme (CSS) - dark green / emerald / charcoal
+#
+# Colors only: no Streamlit widget calls, no logic, nothing here can change
+# analytics, routing, or session state. Same class names as before
+# (.lm-badge / .lm-section-title / .lm-card / .lm-insight / .lm-action) so
+# every existing st.markdown(..., unsafe_allow_html=True) call elsewhere in
+# this file keeps working unchanged.
+#
+# Sidebar nav group headers ("ANALYTICS" / "PREDICTIVE ANALYTICS" /
+# "PROJECT") and the hidden radio dot are CSS-only, best-effort progressive
+# enhancement layered on the SAME single st.sidebar.radio below - they
+# target Streamlit's internal DOM (div[role="radiogroup"] / :has()), which
+# was not rendered/inspected in a live browser in this environment. If a
+# future Streamlit DOM/version doesn't match, these rules simply have no
+# visual effect; they cannot break navigation, since `page` is still driven
+# by the one radio widget and the router logic below is untouched.
 # ---------------------------------------------------------------------------
 st.markdown(
     """
     <style>
-    .stApp { background-color: #F8FAFC; }
-    section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #ffffff 0%, #F3F0FF 100%);
-        border-right: 1px solid #ECE9FE;
+    :root {
+        --lm-bg: #07110D;
+        --lm-bg-alt: #0B1712;
+        --lm-card: #102019;
+        --lm-card-alt: #13261E;
+        --lm-green: #22C55E;
+        --lm-emerald: #10B981;
+        --lm-text: #F4F7F5;
+        --lm-text-secondary: #A7B8AE;
+        --lm-border: rgba(167, 184, 174, 0.14);
+        --lm-border-green: rgba(34, 197, 94, 0.30);
     }
-    h1, h2, h3 { color: #111827; font-weight: 700; }
+
+    .stApp { background-color: var(--lm-bg); }
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, var(--lm-bg-alt) 0%, #081410 100%);
+        border-right: 1px solid var(--lm-border);
+    }
+    header[data-testid="stHeader"] { background: transparent; }
+    #MainMenu { visibility: hidden; }
+    footer { visibility: hidden; }
+    .stDeployButton { display: none; }
+
+    h1, h2, h3 { color: var(--lm-text); font-weight: 700; }
+
     [data-testid="stMetric"] {
-        background: white;
-        border: 1px solid #ECE9FE;
+        background: var(--lm-card);
+        border: 1px solid var(--lm-border);
         border-radius: 14px;
         padding: 1rem 1.1rem;
-        box-shadow: 0 1px 2px rgba(17,24,39,0.04);
+        box-shadow: 0 1px 2px rgba(0,0,0,0.25);
     }
-    [data-testid="stMetricLabel"] { color: #6B7280; font-weight: 500; }
-    [data-testid="stMetricValue"] { color: #111827; }
+    [data-testid="stMetricLabel"] { color: var(--lm-text-secondary); font-weight: 500; }
+    [data-testid="stMetricValue"] { color: var(--lm-text); }
+
     .lm-badge {
         display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px;
-        background: #EFEBFF; color: #7C5CFF; font-size: 0.75rem; font-weight: 600;
+        background: rgba(34,197,94,0.14); color: var(--lm-green); font-size: 0.75rem; font-weight: 600;
+        border: 1px solid var(--lm-border-green);
         margin-bottom: 0.4rem;
     }
-    .lm-section-title { color: #111827; font-weight: 700; margin-top: 0.25rem; }
+    .lm-section-title { color: var(--lm-text); font-weight: 700; margin-top: 0.25rem; }
     .lm-card {
-        background: white; border: 1px solid #ECE9FE; border-radius: 14px;
+        background: var(--lm-card); border: 1px solid var(--lm-border); border-radius: 14px;
         padding: 1rem 1.2rem; margin-bottom: 0.8rem;
     }
     .lm-insight {
-        border-left: 4px solid #7C5CFF; background: #FAFAFF; border-radius: 8px;
-        padding: 0.75rem 1rem; margin: 0.5rem 0 1.2rem 0;
+        border-left: 4px solid var(--lm-emerald); background: var(--lm-card-alt); border-radius: 8px;
+        padding: 0.75rem 1rem; margin: 0.5rem 0 1.2rem 0; color: var(--lm-text);
     }
-    .lm-insight b { color: #111827; }
+    .lm-insight b { color: var(--lm-text); }
     .lm-action {
-        border-left: 4px solid #22D3B0; background: #F2FEFB; border-radius: 8px;
-        padding: 0.9rem 1.1rem; margin-bottom: 1rem;
+        border-left: 4px solid var(--lm-green); background: var(--lm-card-alt); border-radius: 8px;
+        padding: 0.9rem 1.1rem; margin-bottom: 1rem; color: var(--lm-text);
+    }
+
+    /* Sidebar brand lockup */
+    .lm-brand-title { font-size: 1.05rem; font-weight: 800; letter-spacing: 0.02em; color: var(--lm-text); line-height: 1.25; margin: 0; }
+    .lm-brand-sub { font-size: 0.78rem; color: var(--lm-text-secondary); margin: 0 0 0.2rem 0; }
+
+    /* Active-dataset sidebar card */
+    .lm-dataset-card {
+        background: var(--lm-card); border: 1px solid var(--lm-border-green); border-radius: 12px;
+        padding: 0.7rem 0.9rem; font-size: 0.85rem; color: var(--lm-text); line-height: 1.5;
+    }
+    .lm-dataset-card b { color: var(--lm-green); }
+    .lm-nav-caption {
+        font-size: 0.66rem; font-weight: 700; letter-spacing: 0.09em; color: var(--lm-text-secondary);
+        margin: 0.6rem 0 0.25rem 0.1rem; text-transform: uppercase;
+    }
+
+    /* Sidebar navigation - pill-style rows on the existing single radio.
+       :has() only checks whether a <label> CONTAINS a checked radio input
+       anywhere below it, so it is tolerant of Streamlit wrapping the input
+       in extra internal divs. */
+    section[data-testid="stSidebar"] div[role="radiogroup"] { gap: 0.05rem; }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label {
+        border-radius: 8px; padding: 0.42rem 0.6rem; margin-bottom: 0.08rem;
+        border: 1px solid transparent; transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:hover {
+        background: rgba(34,197,94,0.08);
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) {
+        background: rgba(34,197,94,0.16); border-color: var(--lm-border-green);
+    }
+    /* Best-effort group headers - see note above the <style> block */
+    section[data-testid="stSidebar"] div[role="radiogroup"] label:nth-of-type(4)::before {
+        content: "ANALYTICS"; display: block; font-size: 0.66rem; font-weight: 700;
+        letter-spacing: 0.09em; color: var(--lm-text-secondary); margin: 0.6rem 0 0.25rem 0.1rem;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] label:nth-of-type(7)::before {
+        content: "PREDICTIVE ANALYTICS"; display: block; font-size: 0.66rem; font-weight: 700;
+        letter-spacing: 0.09em; color: var(--lm-text-secondary); margin: 0.6rem 0 0.25rem 0.1rem;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] label:nth-of-type(11)::before {
+        content: "PROJECT"; display: block; font-size: 0.66rem; font-weight: 700;
+        letter-spacing: 0.09em; color: var(--lm-text-secondary); margin: 0.6rem 0 0.25rem 0.1rem;
     }
     </style>
     """,
@@ -174,7 +256,11 @@ st.markdown(
 # ---------------------------------------------------------------------------
 # Dataset Center - upload a campus dataset, or fall back to the benchmark
 # ---------------------------------------------------------------------------
-st.sidebar.markdown("### \U0001F393 LearnMate Analytics AI")
+st.sidebar.markdown(
+    """<p class="lm-brand-title">\U0001F393 LEARNMATE</p>
+    <p class="lm-brand-sub">Analytics AI</p>""",
+    unsafe_allow_html=True,
+)
 st.sidebar.caption("Student Employability & Placement Intelligence Platform")
 
 st.sidebar.markdown("#### \U0001F4C2 Campus Dataset")
@@ -227,8 +313,11 @@ schema_match = is_benchmark_schema(raw_df)
 st.sidebar.divider()
 _mode_label = "Uploaded Dataset" if is_uploaded else "Benchmark Dataset"
 st.sidebar.markdown(
-    f"\U0001F7E2 **Active Dataset**\n\n{active_source_name}\n\n"
-    f"{dataset_profile.n_rows:,} rows \u00d7 {dataset_profile.n_cols} columns\n\n{_mode_label}"
+    f"""<div class="lm-dataset-card">\U0001F7E2 <b>Active Dataset</b><br/>
+    {active_source_name}<br/>
+    {dataset_profile.n_rows:,} rows \u00d7 {dataset_profile.n_cols} columns<br/>
+    {_mode_label}</div>""",
+    unsafe_allow_html=True,
 )
 if schema_match:
     st.sidebar.caption("Campus Placement Mode active - specialized placement/salary analytics enabled.")
@@ -242,7 +331,7 @@ st.sidebar.divider()
 # ---------------------------------------------------------------------------
 # Sidebar navigation
 # ---------------------------------------------------------------------------
-st.sidebar.caption("ANALYTICS")
+st.sidebar.markdown('<div class="lm-nav-caption">MAIN</div>', unsafe_allow_html=True)
 page = st.sidebar.radio(
     "Navigate",
     [
@@ -254,8 +343,29 @@ page = st.sidebar.radio(
         "\U0001F916 Placement Prediction", "\U0001F916 Salary Prediction",
         "\U0001F916 Model Evaluation",
         "\U0001F4D8 Project Summary",
+        "\U0001F1EE\U0001F1F3 Government Services",
     ],
     label_visibility="collapsed",
+)
+st.sidebar.divider()
+
+# ---------------------------------------------------------------------------
+# AI Chatbot toggle - UI PLACEHOLDER ONLY (Part 2 scope).
+# No floating chatbot is built yet; this only persists an ON/OFF preference
+# in session_state, defaulting to ON, so the control exists ahead of the
+# real integration. It does not affect any page's rendering or logic.
+# ---------------------------------------------------------------------------
+st.sidebar.markdown('<div class="lm-nav-caption">AI Chatbot</div>', unsafe_allow_html=True)
+if "chatbot_enabled" not in st.session_state:
+    st.session_state["chatbot_enabled"] = True
+st.session_state["chatbot_enabled"] = st.sidebar.toggle(
+    "AI Chatbot",
+    value=st.session_state["chatbot_enabled"],
+    label_visibility="collapsed",
+)
+st.sidebar.caption(
+    "Floating assistant - coming soon. Will reuse the AI Insight Copilot's "
+    "evidence-grounded logic once built."
 )
 st.sidebar.divider()
 
@@ -1432,6 +1542,184 @@ def render_ai_copilot() -> None:
 
 
 # ---------------------------------------------------------------------------
+# AI CHATBOT - dataset-grounded response logic (not a nav page; rendered as
+# a panel on every page via render_chatbot_panel() at the bottom of this
+# file). Reuses the EXACT SAME cached evidence (benchmark) and
+# generic_copilot_answer() (generic) as the AI Insight Copilot above - no
+# analytics are recomputed or duplicated here.
+# ---------------------------------------------------------------------------
+
+CHATBOT_QUICK_PROMPTS = [
+    "Summarize the main dataset findings",
+    "Explain the placement patterns",
+    "Analyze work-experience differences",
+    "Explain the model results",
+    "Explain the student segments",
+    "Help me interpret this dataset",
+]
+
+# Benchmark mode: each quick prompt maps to one or more of the SAME verified
+# intents the AI Insight Copilot's own quick-question buttons use
+# (answer_intent bypasses free-text classification for reliability, exactly
+# as the Copilot does). A composite prompt concatenates the RENDERED TEXT of
+# more than one existing handler - no new statistic is computed here that
+# isn't already produced by build_evidence()/HANDLERS in ai_insights.py.
+BENCHMARK_QUICK_PROMPT_INTENTS: dict[str, tuple[str, ...]] = {
+    "Summarize the main dataset findings": ("main_findings",),
+    "Explain the placement patterns": ("dataset_overview", "workex_placement"),
+    "Analyze work-experience differences": ("workex_placement",),
+    "Explain the model results": ("classification_performance", "salary_model_performance"),
+    "Explain the student segments": ("segmentation_overview", "segmentation_differences"),
+    "Help me interpret this dataset": ("main_findings", "next_steps"),
+}
+
+
+def _benchmark_composite_answer(evidence: dict, intents: tuple[str, ...]) -> str:
+    parts = [render_response_markdown(answer_intent(intent, evidence)) for intent in intents]
+    return "\n\n---\n\n".join(parts)
+
+
+# Generic mode: each quick prompt honestly describes only what the ACTIVE
+# dataset's profile / detected column-name candidates actually show. None of
+# these compute or invent a placement rate, salary figure, or model metric -
+# a generic dataset's real numbers only exist once the user trains something
+# in Predictive Analysis / Student Segmentation, which these responses point
+# to rather than pre-empt.
+def _generic_overview_text(profile, candidates: dict, df: pd.DataFrame) -> str:
+    parts = [f"The active dataset ({active_source_name}) has {profile.n_rows} rows and {profile.n_cols} columns."]
+    if profile.numeric_columns:
+        parts.append(f"Numeric columns: {', '.join(profile.numeric_columns)}.")
+    if profile.categorical_columns:
+        parts.append(f"Categorical columns: {', '.join(profile.categorical_columns)}.")
+    if profile.duplicate_rows:
+        parts.append(f"{profile.duplicate_rows} duplicate row(s) were detected.")
+    if profile.missing_value_columns:
+        miss = ", ".join(f"{c} ({n})" for c, n in profile.missing_value_columns.items())
+        parts.append(f"Missing values were found in: {miss}.")
+    if candidates:
+        concepts = ", ".join(sorted(candidates.keys()))
+        parts.append(
+            f"Column names suggest these campus/student concepts may be present: {concepts} "
+            f"(name-based detection only - not a computed statistic)."
+        )
+    return " ".join(parts)
+
+
+def _generic_placement_text(profile, candidates: dict, df: pd.DataFrame) -> str:
+    if "placement_status" not in candidates:
+        return (
+            "Placement analysis isn't available for this dataset - no column resembling a placement "
+            "status/outcome was detected. You can still use **Data Explorer** for a column profile, "
+            "**Exploratory Data Analysis** for adaptive charts, **Student Segmentation** for generic "
+            "clustering, or **Predictive Analysis** to train a model on any target column you choose."
+        )
+    cols = ", ".join(candidates["placement_status"])
+    return (
+        f"This dataset has a column that looks like a placement/outcome field ({cols}), based on its "
+        f"name - but no placement rate has actually been computed in this conversation. Open "
+        f"**Predictive Analysis** and choose that column as your target to train a real classifier and "
+        f"see verified results for this dataset."
+    )
+
+
+def _generic_workex_text(profile, candidates: dict, df: pd.DataFrame) -> str:
+    if "work_experience" not in candidates:
+        return (
+            "No column resembling work experience was detected in this dataset by name, so a "
+            "work-experience comparison isn't available here. Try **Exploratory Data Analysis** to "
+            "explore whichever categorical columns this dataset does have."
+        )
+    cols = ", ".join(candidates["work_experience"])
+    return (
+        f"This dataset has a column that looks like work experience ({cols}). No comparison has been "
+        f"computed in this conversation yet - use **Exploratory Data Analysis** to chart it against "
+        f"another column, or include it as a feature in **Predictive Analysis**."
+    )
+
+
+def _generic_model_text(profile, candidates: dict, df: pd.DataFrame) -> str:
+    return (
+        "No model has been trained inside this conversation - a generic dataset needs you to choose a "
+        "target column first. Open **Predictive Analysis** to train and evaluate a classifier or "
+        "regressor on a target column you select; the results shown there are real, verified metrics "
+        "for this dataset, never estimated here."
+    )
+
+
+def _generic_segments_text(profile, candidates: dict, df: pd.DataFrame) -> str:
+    if len(profile.numeric_columns) < 2:
+        return (
+            "Student segmentation needs at least two numeric columns, and this dataset doesn't appear "
+            "to have enough - so no segments are available here."
+        )
+    return (
+        "No student segments have been computed in this conversation. Open **Student Segmentation** "
+        "and choose numeric features there to run K-Means clustering and see real cluster profiles "
+        "for this dataset."
+    )
+
+
+def _generic_interpret_text(profile, candidates: dict, df: pd.DataFrame) -> str:
+    return _generic_overview_text(profile, candidates, df) + (
+        " For a deeper look, try Data Explorer, Exploratory Data Analysis, Student Segmentation, or "
+        "Predictive Analysis - each one adapts to this dataset's actual columns."
+    )
+
+
+GENERIC_QUICK_PROMPT_HANDLERS = {
+    "Summarize the main dataset findings": _generic_overview_text,
+    "Explain the placement patterns": _generic_placement_text,
+    "Analyze work-experience differences": _generic_workex_text,
+    "Explain the model results": _generic_model_text,
+    "Explain the student segments": _generic_segments_text,
+    "Help me interpret this dataset": _generic_interpret_text,
+}
+
+
+def chatbot_respond(question: str) -> str:
+    """Single entry point for every AI Chatbot message (quick prompt or
+    typed). Reuses the SAME cached results as the AI Insight Copilot
+    (benchmark mode) or the SAME generic_copilot_answer() engine (generic
+    mode) - the active dataset (`schema_match`, `cleaned_df`, `raw_df`,
+    `dataset_profile`) is whatever is currently loaded at the top of this
+    file; nothing here is specific to the benchmark dataset."""
+    if schema_match:
+        cls_results = get_classification_results(cleaned_df)
+        reg_results = get_regression_results(cleaned_df)
+        seg_diagnostics = get_segmentation_diagnostics(cleaned_df)
+        evidence = get_copilot_evidence(cleaned_df, cls_results, reg_results, seg_diagnostics)
+
+        valid, _issues = validate_evidence(evidence)
+        if not valid:
+            return (
+                "The verified evidence for this dataset could not be validated right now, so I can't "
+                "safely answer. Try the AI Insight Copilot page for more detail."
+            )
+
+        if question in BENCHMARK_QUICK_PROMPT_INTENTS:
+            return _benchmark_composite_answer(evidence, BENCHMARK_QUICK_PROMPT_INTENTS[question])
+
+        secrets_key = None
+        try:
+            secrets_key = st.secrets.get("ANTHROPIC_API_KEY")
+        except Exception:
+            secrets_key = None
+        api_key = get_configured_api_key(secrets_key)
+
+        response = generate_response(question, evidence, api_key=api_key)
+        if response.get("source") == "ai" and response.get("ai_markdown"):
+            return response["ai_markdown"]
+        return render_response_markdown(response)
+
+    candidates = detect_semantic_candidates(raw_df)
+    if question in GENERIC_QUICK_PROMPT_HANDLERS:
+        return GENERIC_QUICK_PROMPT_HANDLERS[question](dataset_profile, candidates, cleaned_df)
+
+    result = generic_copilot_answer(question, cleaned_df, dataset_profile)
+    return result.get("answer", "")
+
+
+# ---------------------------------------------------------------------------
 # PAGE: WHAT-IF SIMULATOR
 # ---------------------------------------------------------------------------
 
@@ -1897,3 +2185,17 @@ elif page == "\U0001F916 Model Evaluation":
     render_model_evaluation()
 elif page == "\U0001F4D8 Project Summary":
     render_project_summary()
+elif page == "\U0001F1EE\U0001F1F3 Government Services":
+    render_government_services_page()
+
+# ---------------------------------------------------------------------------
+# AI CHATBOT - rendered after the router, on every page, gated by the one
+# existing sidebar toggle (st.session_state["chatbot_enabled"], Part 2).
+# Not a nav item / router branch - an integrated panel, not a new page.
+# ---------------------------------------------------------------------------
+if st.session_state.get("chatbot_enabled", True):
+    render_chatbot_panel(
+        chatbot_respond,
+        CHATBOT_QUICK_PROMPTS,
+        subtitle=f"Ask questions about the active dataset ({active_source_name}).",
+    )
