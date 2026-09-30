@@ -182,7 +182,11 @@ st.markdown(
         box-shadow: 0 1px 2px rgba(0,0,0,0.25);
     }
     [data-testid="stMetricLabel"] { color: var(--lm-text-secondary); font-weight: 500; }
-    [data-testid="stMetricValue"] { color: var(--lm-text); }
+    [data-testid="stMetricValue"] {
+        color: var(--lm-text);
+        overflow-wrap: break-word; word-break: break-word;
+        font-size: 1.35rem; line-height: 1.25;
+    }
 
     .lm-badge {
         display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px;
@@ -237,7 +241,7 @@ st.markdown(
     }
     /* Best-effort group headers - see note above the <style> block */
     section[data-testid="stSidebar"] div[role="radiogroup"] label:nth-of-type(4)::before {
-        content: "ANALYTICS"; display: block; font-size: 0.66rem; font-weight: 700;
+        content: "INTELLIGENCE"; display: block; font-size: 0.66rem; font-weight: 700;
         letter-spacing: 0.09em; color: var(--lm-text-secondary); margin: 0.6rem 0 0.25rem 0.1rem;
     }
     section[data-testid="stSidebar"] div[role="radiogroup"] label:nth-of-type(7)::before {
@@ -254,7 +258,7 @@ st.markdown(
 )
 
 # ---------------------------------------------------------------------------
-# Dataset Center - upload a campus dataset, or fall back to the benchmark
+# 1) Brand
 # ---------------------------------------------------------------------------
 st.sidebar.markdown(
     """<p class="lm-brand-title">\U0001F393 LEARNMATE</p>
@@ -263,6 +267,51 @@ st.sidebar.markdown(
 )
 st.sidebar.caption("Student Employability & Placement Intelligence Platform")
 
+# ---------------------------------------------------------------------------
+# 2) Custom grouped navigation - single st.sidebar.radio(), single router.
+# ---------------------------------------------------------------------------
+st.sidebar.markdown('<div class="lm-nav-caption">MAIN</div>', unsafe_allow_html=True)
+page = st.sidebar.radio(
+    "Navigate",
+    [
+        "Overview", "Data Explorer", "Exploratory Data Analysis",
+        "\U0001F9E9 Student Segmentation",
+        "\U0001F9E0 AI Insight Copilot",
+        "\U0001F3AF What-If Simulator",
+        "\U0001F9EC Predictive Analysis",
+        "\U0001F916 Placement Prediction", "\U0001F916 Salary Prediction",
+        "\U0001F916 Model Evaluation",
+        "\U0001F4D8 Project Summary",
+        "\U0001F1EE\U0001F1F3 Government Services",
+    ],
+    label_visibility="collapsed",
+)
+st.sidebar.divider()
+
+# ---------------------------------------------------------------------------
+# 3) AI Data Mentor ON/OFF - feature enable/disable switch only.
+# This does NOT by itself open/expand the chatbot panel; it only controls
+# whether the panel can render at all. Open/closed state is a separate
+# concern (see utils/chatbot_ui.py).
+# ---------------------------------------------------------------------------
+st.sidebar.markdown('<div class="lm-nav-caption">AI Data Mentor</div>', unsafe_allow_html=True)
+if "chatbot_enabled" not in st.session_state:
+    st.session_state["chatbot_enabled"] = True
+st.session_state["chatbot_enabled"] = st.sidebar.toggle(
+    "AI Data Mentor",
+    value=st.session_state["chatbot_enabled"],
+    label_visibility="collapsed",
+)
+if not st.session_state["chatbot_enabled"]:
+    # Disabling the feature also collapses the panel - render_chatbot_panel()
+    # itself never runs while disabled, so this reset can only happen here.
+    st.session_state["chatbot_open"] = False
+st.sidebar.caption("Turns the AI Data Mentor panel on or off for this session.")
+st.sidebar.divider()
+
+# ---------------------------------------------------------------------------
+# 4) Campus Dataset - upload a campus dataset, or fall back to the benchmark
+# ---------------------------------------------------------------------------
 st.sidebar.markdown("#### \U0001F4C2 Campus Dataset")
 st.sidebar.caption("Upload a CSV or Excel campus dataset and LearnMate Analytics AI will automatically "
                     "profile the available columns and enable compatible analytics.")
@@ -310,6 +359,9 @@ else:
 dataset_profile = profile_dataset(raw_df)
 schema_match = is_benchmark_schema(raw_df)
 
+# ---------------------------------------------------------------------------
+# 5) Active Dataset card
+# ---------------------------------------------------------------------------
 st.sidebar.divider()
 _mode_label = "Uploaded Dataset" if is_uploaded else "Benchmark Dataset"
 st.sidebar.markdown(
@@ -326,47 +378,6 @@ else:
         "Generic Mode - adaptive analytics for campus/student datasets. Specialized placement/salary "
         "pages require the benchmark-style columns; some datasets may need manual target selection."
     )
-st.sidebar.divider()
-
-# ---------------------------------------------------------------------------
-# Sidebar navigation
-# ---------------------------------------------------------------------------
-st.sidebar.markdown('<div class="lm-nav-caption">MAIN</div>', unsafe_allow_html=True)
-page = st.sidebar.radio(
-    "Navigate",
-    [
-        "Overview", "Data Explorer", "Exploratory Data Analysis",
-        "\U0001F9E9 Student Segmentation",
-        "\U0001F9E0 AI Insight Copilot",
-        "\U0001F3AF What-If Simulator",
-        "\U0001F9EC Predictive Analysis",
-        "\U0001F916 Placement Prediction", "\U0001F916 Salary Prediction",
-        "\U0001F916 Model Evaluation",
-        "\U0001F4D8 Project Summary",
-        "\U0001F1EE\U0001F1F3 Government Services",
-    ],
-    label_visibility="collapsed",
-)
-st.sidebar.divider()
-
-# ---------------------------------------------------------------------------
-# AI Chatbot toggle - UI PLACEHOLDER ONLY (Part 2 scope).
-# No floating chatbot is built yet; this only persists an ON/OFF preference
-# in session_state, defaulting to ON, so the control exists ahead of the
-# real integration. It does not affect any page's rendering or logic.
-# ---------------------------------------------------------------------------
-st.sidebar.markdown('<div class="lm-nav-caption">AI Chatbot</div>', unsafe_allow_html=True)
-if "chatbot_enabled" not in st.session_state:
-    st.session_state["chatbot_enabled"] = True
-st.session_state["chatbot_enabled"] = st.sidebar.toggle(
-    "AI Chatbot",
-    value=st.session_state["chatbot_enabled"],
-    label_visibility="collapsed",
-)
-st.sidebar.caption(
-    "Floating assistant - coming soon. Will reuse the AI Insight Copilot's "
-    "evidence-grounded logic once built."
-)
 st.sidebar.divider()
 
 # ---------------------------------------------------------------------------
@@ -475,10 +486,33 @@ def benchmark_only_notice(page_name: str, required_cols_hint: str = "") -> None:
 
 def render_overview() -> None:
     if not schema_match:
+        st.markdown('<span class="lm-badge">LIVE DATA - CALCULATED FROM ACTIVE DATASET</span>', unsafe_allow_html=True)
         st.title("Overview")
-        benchmark_only_notice("The Overview dashboard", "e.g. status, salary, ssc_p, workex")
+        st.caption("From Student Data to Employability Intelligence")
+
+        st.markdown('<h3 class="lm-section-title">Dataset Snapshot</h3>', unsafe_allow_html=True)
+        d1, d2, d3, d4 = st.columns(4)
+        d1.metric("Dataset", active_source_name)
+        d2.metric("Rows", f"{dataset_profile.n_rows:,}")
+        d3.metric("Columns", f"{dataset_profile.n_cols}")
+        d4.metric("Numeric Columns", f"{len(dataset_profile.numeric_columns)}")
+
+        s1, s2 = st.columns(2)
+        with s1:
+            st.markdown("##### Numeric Columns")
+            st.markdown(
+                ", ".join(f"`{c}`" for c in dataset_profile.numeric_columns) or "_None detected._"
+            )
+        with s2:
+            st.markdown("##### Categorical Columns")
+            st.markdown(
+                ", ".join(f"`{c}`" for c in dataset_profile.categorical_columns) or "_None detected._"
+            )
+
+        st.divider()
+        benchmark_only_notice("The full placement-intelligence Overview dashboard", "e.g. status, salary, ssc_p, workex")
         return
-    st.markdown('<span class="lm-badge">LIVE DATA - CALCULATED FROM CSV</span>', unsafe_allow_html=True)
+    st.markdown('<span class="lm-badge">LIVE DATA - CALCULATED FROM ACTIVE DATASET</span>', unsafe_allow_html=True)
     st.title("Overview")
     st.caption("From Student Data to Employability Intelligence")
 
@@ -2054,148 +2088,4 @@ def render_project_summary() -> None:
     st.warning(
         "- Small dataset size (215 records; only 148 with a recorded salary).\n"
         "- Observational data - no experimental control, so associations are not causal evidence.\n"
-        "- Model uncertainty - metrics come from a single train/test split and may vary with a different one.\n"
-        "- The salary regression models are weak on this dataset (negative R\u00b2).\n"
-        "- Clustering separation is modest (silhouette 0.12-0.18).\n"
-        "- Sensitive/non-predictive fields (`gender`, `sl_no`) are excluded from every predictive model.\n"
-        "- No guarantee of placement or salary is made anywhere in this application.\n"
-        "- A larger, richer dataset (e.g. with company, role, or location data) would be needed for any "
-        "real-world deployment consideration."
-    )
-
-    st.divider()
-    st.caption(
-        "LearnMate Analytics AI - built for the AICTE | IBM SkillsBuild Data Analytics with AI "
-        "Internship 2026, BharatCares. AI-assisted development was used; see README.md for details."
-    )
-
-
-def render_predictive_analysis() -> None:
-    """Generic, target-driven predictive workflow (Part 10): the user picks
-    a target column and a task, the app validates suitability, excludes
-    obvious identifiers, warns about likely leakage columns, then trains
-    the appropriate model(s) live. Works for ANY dataset, including the
-    benchmark one (as an additional, explicit-choice option alongside the
-    fixed Placement/Salary Prediction pages)."""
-    st.title("\U0001F9EC Predictive Analysis")
-    st.caption(f"Target-driven classification/regression for **{active_source_name}**.")
-    st.info(
-        "Select a target column and a task below. Only columns that pass a basic suitability check "
-        "will train - this never guesses a target for you."
-    )
-
-    all_cols = list(cleaned_df.columns)
-    semantic = detect_semantic_candidates(raw_df)
-    hint_cols = set()
-    for concept in ("placement_status", "salary"):
-        hint_cols.update(semantic.get(concept, []))
-    if hint_cols:
-        st.caption(f"Possible target detected (heuristic, not certain): {', '.join(sorted(hint_cols))}")
-
-    s1, s2 = st.columns(2)
-    with s1:
-        target_col = st.selectbox("Target column", all_cols, key="pred_target")
-    with s2:
-        task = st.selectbox("Task", ["Classification", "Regression"], key="pred_task")
-    task_key = "classification" if task == "Classification" else "regression"
-
-    validation_result = validate_generic_target(cleaned_df, target_col, task_key)
-    if not validation_result.ok:
-        st.error(f"This target/task combination is not usable: {validation_result.reason}")
-        return
-
-    candidate_features = [
-        c for c in all_cols
-        if c != target_col and c not in dataset_profile.identifier_like_columns
-    ]
-    default_features = [c for c in candidate_features if c not in dataset_profile.high_cardinality_columns]
-    feature_cols = st.multiselect("Feature columns (identifiers pre-excluded)", candidate_features,
-                                   default=default_features, key="pred_features")
-    if not feature_cols:
-        st.warning("Select at least one feature column.")
-        return
-
-    leakage_warning = suggest_leakage_columns(feature_cols, target_col)
-    if leakage_warning:
-        st.warning(
-            f"These selected feature(s) may contain information that occurs after the target outcome "
-            f"and could cause data leakage: {', '.join(leakage_warning)}. Review before including them."
-        )
-
-    model_options = list(GENERIC_CLASSIFICATION_MODELS.keys()) if task_key == "classification" \
-        else list(GENERIC_REGRESSION_MODELS.keys())
-    model_name = st.selectbox("Model", model_options, key="pred_model")
-
-    if st.button("Train model", key="pred_train_button"):
-        try:
-            if task_key == "classification":
-                result = train_generic_classifier(cleaned_df, target_col, feature_cols, model_name)
-                st.success(f"Trained {model_name} on {result.n_train} rows (tested on {result.n_test}). "
-                           f"Positive class: '{result.positive_label}'.")
-                m1, m2, m3, m4, m5 = st.columns(5)
-                m1.metric("Accuracy", f"{result.metrics['accuracy']:.3f}")
-                m2.metric("Precision", f"{result.metrics['precision']:.3f}")
-                m3.metric("Recall", f"{result.metrics['recall']:.3f}")
-                m4.metric("F1", f"{result.metrics['f1']:.3f}")
-                m5.metric("ROC-AUC", f"{result.metrics['roc_auc']:.3f}" if result.metrics["roc_auc"] is not None else "N/A")
-            else:
-                result = train_generic_regressor(cleaned_df, target_col, feature_cols, model_name)
-                st.success(f"Trained {model_name} on {result.n_train} rows (tested on {result.n_test}).")
-                m1, m2, m3 = st.columns(3)
-                m1.metric("MAE", f"{result.metrics['mae']:,.2f}")
-                m2.metric("RMSE", f"{result.metrics['rmse']:,.2f}")
-                m3.metric("R\u00b2", f"{result.metrics['r2']:.3f}")
-                if result.metrics["r2"] < 0:
-                    st.caption(
-                        "A negative R\u00b2 means this model did not outperform a simple mean-value "
-                        "baseline on this test split - a genuine result, not an error."
-                    )
-            st.caption(
-                "These results come from a single 80/20 train/test split (random_state=42) on this "
-                "dataset and should be treated as an exploratory, educational result - not a "
-                "production benchmark."
-            )
-        except Exception as e:
-            st.error(f"Could not train this model: {e}")
-
-
-# ---------------------------------------------------------------------------
-# Router
-# ---------------------------------------------------------------------------
-
-if page == "Overview":
-    render_overview()
-elif page == "Data Explorer":
-    render_data_explorer()
-elif page == "Exploratory Data Analysis":
-    render_eda()
-elif page == "\U0001F9E9 Student Segmentation":
-    render_student_segmentation()
-elif page == "\U0001F9E0 AI Insight Copilot":
-    render_ai_copilot()
-elif page == "\U0001F3AF What-If Simulator":
-    render_whatif_simulator()
-elif page == "\U0001F9EC Predictive Analysis":
-    render_predictive_analysis()
-elif page == "\U0001F916 Placement Prediction":
-    render_placement_prediction()
-elif page == "\U0001F916 Salary Prediction":
-    render_salary_prediction()
-elif page == "\U0001F916 Model Evaluation":
-    render_model_evaluation()
-elif page == "\U0001F4D8 Project Summary":
-    render_project_summary()
-elif page == "\U0001F1EE\U0001F1F3 Government Services":
-    render_government_services_page()
-
-# ---------------------------------------------------------------------------
-# AI CHATBOT - rendered after the router, on every page, gated by the one
-# existing sidebar toggle (st.session_state["chatbot_enabled"], Part 2).
-# Not a nav item / router branch - an integrated panel, not a new page.
-# ---------------------------------------------------------------------------
-if st.session_state.get("chatbot_enabled", True):
-    render_chatbot_panel(
-        chatbot_respond,
-        CHATBOT_QUICK_PROMPTS,
-        subtitle=f"Ask questions about the active dataset ({active_source_name}).",
-    )
+        "- Model uncertainty - metrics come from a single train
