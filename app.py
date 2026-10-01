@@ -2088,4 +2088,148 @@ def render_project_summary() -> None:
     st.warning(
         "- Small dataset size (215 records; only 148 with a recorded salary).\n"
         "- Observational data - no experimental control, so associations are not causal evidence.\n"
-        "- Model uncertainty - metrics come from a single train
+        "- Model uncertainty - metrics come from a single train/test split and may vary with a different one.\n"
+        "- The salary regression models are weak on this dataset (negative R\u00b2).\n"
+        "- Clustering separation is modest (silhouette 0.12-0.18).\n"
+        "- Sensitive/non-predictive fields (`gender`, `sl_no`) are excluded from every predictive model.\n"
+        "- No guarantee of placement or salary is made anywhere in this application.\n"
+        "- A larger, richer dataset (e.g. with company, role, or location data) would be needed for any "
+        "real-world deployment consideration."
+    )
+
+    st.divider()
+    st.caption(
+        "LearnMate Analytics AI - built for the AICTE | IBM SkillsBuild Data Analytics with AI "
+        "Internship 2026, BharatCares. AI-assisted development was used; see README.md for details."
+    )
+
+
+def render_predictive_analysis() -> None:
+    """Generic, target-driven predictive workflow (Part 10): the user picks
+    a target column and a task, the app validates suitability, excludes
+    obvious identifiers, warns about likely leakage columns, then trains
+    the appropriate model(s) live. Works for ANY dataset, including the
+    benchmark one (as an additional, explicit-choice option alongside the
+    fixed Placement/Salary Prediction pages)."""
+    st.title("\U0001F9EC Predictive Analysis")
+    st.caption(f"Target-driven classification/regression for **{active_source_name}**.")
+    st.info(
+        "Select a target column and a task below. Only columns that pass a basic suitability check "
+        "will train - this never guesses a target for you."
+    )
+
+    all_cols = list(cleaned_df.columns)
+    semantic = detect_semantic_candidates(raw_df)
+    hint_cols = set()
+    for concept in ("placement_status", "salary"):
+        hint_cols.update(semantic.get(concept, []))
+    if hint_cols:
+        st.caption(f"Possible target detected (heuristic, not certain): {', '.join(sorted(hint_cols))}")
+
+    s1, s2 = st.columns(2)
+    with s1:
+        target_col = st.selectbox("Target column", all_cols, key="pred_target")
+    with s2:
+        task = st.selectbox("Task", ["Classification", "Regression"], key="pred_task")
+    task_key = "classification" if task == "Classification" else "regression"
+
+    validation_result = validate_generic_target(cleaned_df, target_col, task_key)
+    if not validation_result.ok:
+        st.error(f"This target/task combination is not usable: {validation_result.reason}")
+        return
+
+    candidate_features = [
+        c for c in all_cols
+        if c != target_col and c not in dataset_profile.identifier_like_columns
+    ]
+    default_features = [c for c in candidate_features if c not in dataset_profile.high_cardinality_columns]
+    feature_cols = st.multiselect("Feature columns (identifiers pre-excluded)", candidate_features,
+                                   default=default_features, key="pred_features")
+    if not feature_cols:
+        st.warning("Select at least one feature column.")
+        return
+
+    leakage_warning = suggest_leakage_columns(feature_cols, target_col)
+    if leakage_warning:
+        st.warning(
+            f"These selected feature(s) may contain information that occurs after the target outcome "
+            f"and could cause data leakage: {', '.join(leakage_warning)}. Review before including them."
+        )
+
+    model_options = list(GENERIC_CLASSIFICATION_MODELS.keys()) if task_key == "classification" \
+        else list(GENERIC_REGRESSION_MODELS.keys())
+    model_name = st.selectbox("Model", model_options, key="pred_model")
+
+    if st.button("Train model", key="pred_train_button"):
+        try:
+            if task_key == "classification":
+                result = train_generic_classifier(cleaned_df, target_col, feature_cols, model_name)
+                st.success(f"Trained {model_name} on {result.n_train} rows (tested on {result.n_test}). "
+                           f"Positive class: '{result.positive_label}'.")
+                m1, m2, m3, m4, m5 = st.columns(5)
+                m1.metric("Accuracy", f"{result.metrics['accuracy']:.3f}")
+                m2.metric("Precision", f"{result.metrics['precision']:.3f}")
+                m3.metric("Recall", f"{result.metrics['recall']:.3f}")
+                m4.metric("F1", f"{result.metrics['f1']:.3f}")
+                m5.metric("ROC-AUC", f"{result.metrics['roc_auc']:.3f}" if result.metrics["roc_auc"] is not None else "N/A")
+            else:
+                result = train_generic_regressor(cleaned_df, target_col, feature_cols, model_name)
+                st.success(f"Trained {model_name} on {result.n_train} rows (tested on {result.n_test}).")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("MAE", f"{result.metrics['mae']:,.2f}")
+                m2.metric("RMSE", f"{result.metrics['rmse']:,.2f}")
+                m3.metric("R\u00b2", f"{result.metrics['r2']:.3f}")
+                if result.metrics["r2"] < 0:
+                    st.caption(
+                        "A negative R\u00b2 means this model did not outperform a simple mean-value "
+                        "baseline on this test split - a genuine result, not an error."
+                    )
+            st.caption(
+                "These results come from a single 80/20 train/test split (random_state=42) on this "
+                "dataset and should be treated as an exploratory, educational result - not a "
+                "production benchmark."
+            )
+        except Exception as e:
+            st.error(f"Could not train this model: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Router
+# ---------------------------------------------------------------------------
+
+if page == "Overview":
+    render_overview()
+elif page == "Data Explorer":
+    render_data_explorer()
+elif page == "Exploratory Data Analysis":
+    render_eda()
+elif page == "\U0001F9E9 Student Segmentation":
+    render_student_segmentation()
+elif page == "\U0001F9E0 AI Insight Copilot":
+    render_ai_copilot()
+elif page == "\U0001F3AF What-If Simulator":
+    render_whatif_simulator()
+elif page == "\U0001F9EC Predictive Analysis":
+    render_predictive_analysis()
+elif page == "\U0001F916 Placement Prediction":
+    render_placement_prediction()
+elif page == "\U0001F916 Salary Prediction":
+    render_salary_prediction()
+elif page == "\U0001F916 Model Evaluation":
+    render_model_evaluation()
+elif page == "\U0001F4D8 Project Summary":
+    render_project_summary()
+elif page == "\U0001F1EE\U0001F1F3 Government Services":
+    render_government_services_page()
+
+# ---------------------------------------------------------------------------
+# AI CHATBOT - rendered after the router, on every page, gated by the one
+# existing sidebar toggle (st.session_state["chatbot_enabled"], Part 2).
+# Not a nav item / router branch - an integrated panel, not a new page.
+# ---------------------------------------------------------------------------
+if st.session_state.get("chatbot_enabled", True):
+    render_chatbot_panel(
+        chatbot_respond,
+        CHATBOT_QUICK_PROMPTS,
+        subtitle=f"Ask questions about the active dataset ({active_source_name}).",
+    )
