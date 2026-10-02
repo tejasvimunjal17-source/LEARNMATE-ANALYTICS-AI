@@ -126,6 +126,7 @@ st.set_page_config(
     page_title="LearnMate Analytics AI",
     page_icon="\U0001F393",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 # ---------------------------------------------------------------------------
@@ -167,10 +168,40 @@ st.markdown(
         background: linear-gradient(180deg, var(--lm-bg-alt) 0%, #081410 100%);
         border-right: 1px solid var(--lm-border);
     }
-    header[data-testid="stHeader"] { background: transparent; }
+    /* ===== Part 3: Streamlit app-chrome cleanup =====
+       stHeader itself is NEVER hidden: on some Streamlit versions the native
+       sidebar expand control (restyled as the 💻 tile in Part 2) lives inside
+       it. So the header is kept, made transparent and short, and only the
+       platform widgets inside it are hidden - by narrow test-id, not by a
+       blanket "header *" rule. Selectors for the sidebar controls
+       (stSidebarCollapseButton / stExpandSidebarButton /
+       stSidebarCollapsedControl / collapsedControl) are deliberately absent
+       from every rule in this block. */
+    header[data-testid="stHeader"] {
+        background: transparent; height: 2.75rem; min-height: 2.75rem; box-shadow: none;
+    }
+    /* Share / star / edit / GitHub actions, the three-dot menu and the Deploy
+       button (names differ between Streamlit versions; each is a no-op if
+       absent). */
+    [data-testid="stToolbarActions"],
+    [data-testid="stMainMenu"],
+    [data-testid="stAppDeployButton"],
+    [data-testid="stStatusWidget"],
+    [data-testid="stDecoration"],
+    .stDeployButton { display: none !important; }
     #MainMenu { visibility: hidden; }
     footer { visibility: hidden; }
-    .stDeployButton { display: none; }
+    /* Whole toolbar wrapper: hidden ONLY when it does not contain a native
+       sidebar control. If a Streamlit version nests the expand control inside
+       it, this rule simply does not match and the narrow rules above apply.
+       (Browsers without :has() drop this one rule and keep the others.) */
+    [data-testid="stToolbar"]:not(:has([data-testid="stExpandSidebarButton"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"], [data-testid="stSidebarCollapseButton"])) {
+        display: none !important;
+    }
+    /* Streamlit Community Cloud viewer badge, when it is part of the app DOM */
+    div[class^="viewerBadge"], div[class*=" viewerBadge"] { display: none !important; }
+    /* Reclaim the space the full-height header used to reserve */
+    [data-testid="stMainBlockContainer"], .block-container { padding-top: 3.25rem; }
 
     h1, h2, h3 { color: var(--lm-text); font-weight: 700; }
 
@@ -224,33 +255,239 @@ st.markdown(
         margin: 0.6rem 0 0.25rem 0.1rem; text-transform: uppercase;
     }
 
-    /* Sidebar navigation - pill-style rows on the existing single radio.
-       :has() only checks whether a <label> CONTAINS a checked radio input
-       anywhere below it, so it is tolerant of Streamlit wrapping the input
-       in extra internal divs. */
-    section[data-testid="stSidebar"] div[role="radiogroup"] { gap: 0.05rem; }
+    /* ===== Part 2: custom LearnMate sidebar =====
+       CSS-only restyle of the SAME single st.sidebar.radio(). Every rule is
+       prefixed with section[data-testid="stSidebar"] (or targets the native
+       sidebar toggle test-ids), so nothing here can reach the main-area
+       chatbot (.st-key-lm_ai_chatbot / .st-key-lm_chatbot_launcher).
+       If a Streamlit version's DOM doesn't match a selector, that rule is a
+       no-op - routing is still driven by the one radio widget. */
+    section[data-testid="stSidebar"] [data-testid="stSidebarContent"] { overflow-x: hidden; }
+    section[data-testid="stSidebar"] hr { margin: 0.8rem 0; border-color: var(--lm-border); opacity: 0.8; }
+
+    /* Brand lockup: compact 💻 tile + title */
+    .lm-brand { display: flex; align-items: center; gap: 0.7rem; margin: 0.15rem 0 0.35rem 0; }
+    .lm-brand-icon {
+        flex: 0 0 auto; width: 2.5rem; height: 2.5rem; border-radius: 12px;
+        display: flex; align-items: center; justify-content: center; font-size: 1.35rem;
+        background: linear-gradient(135deg, rgba(34,197,94,0.28) 0%, rgba(16,185,129,0.12) 100%);
+        border: 1px solid var(--lm-border-green);
+        box-shadow: 0 0 14px rgba(34,197,94,0.18);
+    }
+    .lm-brand-text { min-width: 0; }
+
+    /* Navigation rows (the existing radio) */
+    section[data-testid="stSidebar"] div[role="radiogroup"] { gap: 0.1rem; width: 100%; }
     section[data-testid="stSidebar"] div[role="radiogroup"] > label {
-        border-radius: 8px; padding: 0.42rem 0.6rem; margin-bottom: 0.08rem;
-        border: 1px solid transparent; transition: background 0.15s ease, border-color 0.15s ease;
+        position: relative; width: 100%; box-sizing: border-box; cursor: pointer;
+        border-radius: 10px; padding: 0.5rem 0.75rem; margin: 0;
+        border: 1px solid var(--lm-border); background: transparent;
+        transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    /* hide the radio circle/dot (first <div> child of the label) */
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label > div:first-of-type { display: none; }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label p {
+        font-size: 0.9rem; line-height: 1.3; color: var(--lm-text-secondary); margin: 0;
     }
     section[data-testid="stSidebar"] div[role="radiogroup"] > label:hover {
-        background: rgba(34,197,94,0.08);
+        background: rgba(34,197,94,0.08); border-color: var(--lm-border-green);
     }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:hover p { color: var(--lm-text); }
     section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) {
-        background: rgba(34,197,94,0.16); border-color: var(--lm-border-green);
+        background: linear-gradient(90deg, rgba(34,197,94,0.24) 0%, rgba(16,185,129,0.12) 100%);
+        border-color: var(--lm-border-green);
+        box-shadow: 0 0 12px rgba(34,197,94,0.14);
     }
-    /* Best-effort group headers - see note above the <style> block */
-    section[data-testid="stSidebar"] div[role="radiogroup"] label:nth-of-type(4)::before {
-        content: "INTELLIGENCE"; display: block; font-size: 0.66rem; font-weight: 700;
-        letter-spacing: 0.09em; color: var(--lm-text-secondary); margin: 0.6rem 0 0.25rem 0.1rem;
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) p {
+        color: #FFFFFF; font-weight: 700;
     }
-    section[data-testid="stSidebar"] div[role="radiogroup"] label:nth-of-type(7)::before {
-        content: "PREDICTIVE ANALYTICS"; display: block; font-size: 0.66rem; font-weight: 700;
-        letter-spacing: 0.09em; color: var(--lm-text-secondary); margin: 0.6rem 0 0.25rem 0.1rem;
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:focus-visible) {
+        outline: 2px solid var(--lm-green); outline-offset: 1px;
     }
-    section[data-testid="stSidebar"] div[role="radiogroup"] label:nth-of-type(11)::before {
-        content: "PROJECT"; display: block; font-size: 0.66rem; font-weight: 700;
-        letter-spacing: 0.09em; color: var(--lm-text-secondary); margin: 0.6rem 0 0.25rem 0.1rem;
+
+    /* Group headings: the first group ("INTELLIGENCE", routes 1-4) is the
+       .lm-nav-caption markdown above the radio. The other two are
+       best-effort pseudo-elements positioned ABSOLUTELY above rows 5 and 11
+       (so they are independent of the label's flex layout and are not part
+       of the row's hover/active box). Positions follow the existing route
+       order: 5 = AI Insight Copilot, 11 = Project Summary. */
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-of-type(5),
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-of-type(11) { margin-top: 1.9rem; }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-of-type(5)::before,
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-of-type(11)::before {
+        position: absolute; left: 0.1rem; bottom: 100%; margin-bottom: 0.4rem;
+        font-size: 0.66rem; font-weight: 700; letter-spacing: 0.09em; line-height: 1;
+        color: var(--lm-text-secondary); white-space: nowrap; pointer-events: none;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-of-type(5)::before { content: "AI & PREDICTION"; }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-of-type(11)::before { content: "PROJECT"; }
+
+    /* Dataset controls (sidebar-scoped only) */
+    section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] {
+        background: var(--lm-card); border: 1px dashed var(--lm-border-green); border-radius: 12px;
+    }
+    section[data-testid="stSidebar"] .stButton > button {
+        border-radius: 10px; border: 1px solid var(--lm-border-green); background: var(--lm-card);
+        color: var(--lm-text); font-weight: 600;
+    }
+    section[data-testid="stSidebar"] .stButton > button:hover { background: rgba(34,197,94,0.12); }
+    .lm-dataset-card { overflow-wrap: anywhere; }
+
+    /* 💻 sidebar control: the NATIVE collapse (inside the sidebar) and
+       expand (when collapsed) controls stay fully functional; only their
+       arrow glyph is replaced. Compatibility set covers Streamlit's
+       renamed test-ids across versions. No JS, no second toggle. */
+    [data-testid="stSidebarCollapseButton"] button,
+    [data-testid="stExpandSidebarButton"],
+    [data-testid="stSidebarCollapsedControl"] button,
+    [data-testid="collapsedControl"] button,
+    button[data-testid="stSidebarCollapseButton"] {
+        width: 2.4rem; height: 2.4rem; border-radius: 12px; padding: 0;
+        display: inline-flex; align-items: center; justify-content: center;
+        background: var(--lm-card); border: 1px solid var(--lm-border-green);
+        box-shadow: 0 0 12px rgba(34,197,94,0.16);
+        transition: background 0.15s ease, box-shadow 0.15s ease;
+    }
+    [data-testid="stSidebarCollapseButton"] button:hover,
+    [data-testid="stExpandSidebarButton"]:hover,
+    [data-testid="stSidebarCollapsedControl"] button:hover,
+    [data-testid="collapsedControl"] button:hover,
+    button[data-testid="stSidebarCollapseButton"]:hover {
+        background: rgba(34,197,94,0.16); box-shadow: 0 0 16px rgba(34,197,94,0.28);
+    }
+    [data-testid="stSidebarCollapseButton"] button > *,
+    [data-testid="stExpandSidebarButton"] > *,
+    [data-testid="stSidebarCollapsedControl"] button > *,
+    [data-testid="collapsedControl"] button > *,
+    button[data-testid="stSidebarCollapseButton"] > * { display: none; }
+    [data-testid="stSidebarCollapseButton"] button::before,
+    [data-testid="stExpandSidebarButton"]::before,
+    [data-testid="stSidebarCollapsedControl"] button::before,
+    [data-testid="collapsedControl"] button::before,
+    button[data-testid="stSidebarCollapseButton"]::before {
+        content: "\U0001F4BB"; font-size: 1.2rem; line-height: 1;
+    }
+
+    /* Mobile: keep the native overlay sidebar usable, no horizontal overflow */
+    @media (max-width: 640px) {
+        section[data-testid="stSidebar"][aria-expanded="true"] { max-width: 88vw; }
+        section[data-testid="stSidebar"] div[role="radiogroup"] > label { padding: 0.55rem 0.65rem; }
+        section[data-testid="stSidebar"] div[role="radiogroup"] > label p { font-size: 0.88rem; }
+    }
+    /* ===== Part 4: tabs, buttons and boundaries =====
+       Appended AFTER the Part 2/3 rules. CSS only: no widget, label, key,
+       callback or routing change.
+       Scoping: generic button rules exclude the AI Data Mentor
+       (.st-key-lm_ai_chatbot / .st-key-lm_chatbot_launcher) and the sidebar
+       (which keeps its own Part 2 rules) with :not(ancestor *). A browser
+       without that syntax drops the whole rule, i.e. Streamlit's default
+       buttons - a safe failure, never a broken layout. Tab/button/input
+       selectors are Streamlit/BaseWeb DOM and may differ by version
+       (requirements.txt is unpinned); each is a no-op if unmatched. */
+
+    /* --- Tabs (existing st.tabs: both EDA views) --- */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 0.4rem; padding: 0.3rem; background: var(--lm-bg-alt);
+        border: 1px solid var(--lm-border); border-radius: 12px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: auto; padding: 0.45rem 0.95rem; border-radius: 10px;
+        background: transparent; border: 1px solid var(--lm-border);
+        color: var(--lm-text-secondary); font-weight: 600; white-space: nowrap;
+        transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .stTabs [data-baseweb="tab"] p { color: inherit; font-weight: inherit; margin: 0; }
+    .stTabs [data-baseweb="tab"]:hover {
+        background: rgba(34,197,94,0.08); border-color: var(--lm-border-green); color: var(--lm-text);
+    }
+    .stTabs [data-baseweb="tab"][aria-selected="true"] {
+        background: linear-gradient(90deg, rgba(34,197,94,0.24) 0%, rgba(16,185,129,0.12) 100%);
+        border-color: var(--lm-border-green); color: #FFFFFF;
+        box-shadow: 0 0 12px rgba(34,197,94,0.16);
+    }
+    .stTabs [data-baseweb="tab"]:focus-visible { outline: 2px solid var(--lm-green); outline-offset: 1px; }
+    .stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] { display: none; }
+
+    /* --- Buttons: secondary/default language (main area only) --- */
+    :where(.stButton, .stFormSubmitButton, [data-testid="stFormSubmitButton"], .stDownloadButton, [data-testid="stDownloadButton"]) > button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *) {
+        min-height: 2.5rem; padding: 0.45rem 1.15rem; border-radius: 10px;
+        background: var(--lm-card); color: var(--lm-text); font-weight: 600;
+        border: 1px solid var(--lm-border);
+        transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    :where(.stButton, .stFormSubmitButton, [data-testid="stFormSubmitButton"], .stDownloadButton, [data-testid="stDownloadButton"]) > button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *) p { color: inherit; font-weight: inherit; }
+    :where(.stButton, .stFormSubmitButton, [data-testid="stFormSubmitButton"], .stDownloadButton, [data-testid="stDownloadButton"]) > button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *):hover {
+        transform: translateY(-1px); background: var(--lm-card-alt);
+        border-color: var(--lm-border-green); box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+    }
+    :where(.stButton, .stFormSubmitButton, [data-testid="stFormSubmitButton"], .stDownloadButton, [data-testid="stDownloadButton"]) > button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *):active { transform: translateY(0); box-shadow: none; }
+    :where(.stButton, .stFormSubmitButton, [data-testid="stFormSubmitButton"], .stDownloadButton, [data-testid="stDownloadButton"]) > button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *):focus-visible { outline: 2px solid var(--lm-green); outline-offset: 2px; }
+    :where(.stButton, .stFormSubmitButton, [data-testid="stFormSubmitButton"], .stDownloadButton, [data-testid="stDownloadButton"]) > button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *):disabled { opacity: 0.5; transform: none; box-shadow: none; cursor: not-allowed; }
+
+    /* --- Primary look: form submit buttons (Predict placement / Predict
+       salary / Ask), the "Train model" button, and any button Streamlit
+       marks as primary. Dark text on emerald for contrast. --- */
+    .stApp :where(.stFormSubmitButton, [data-testid="stFormSubmitButton"]) > button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *),
+    .stApp .st-key-pred_train_button button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *),
+    .stApp :where(.stButton, .stFormSubmitButton, .stDownloadButton) > button[kind^="primary"]:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *),
+    .stApp :where(.stButton, .stFormSubmitButton, .stDownloadButton) > button[data-testid^="stBaseButton-primary"]:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *) {
+        background: linear-gradient(135deg, var(--lm-green) 0%, var(--lm-emerald) 100%);
+        color: #06110B; border-color: transparent;
+        box-shadow: 0 4px 14px rgba(16,185,129,0.30);
+    }
+    .stApp :where(.stFormSubmitButton, [data-testid="stFormSubmitButton"]) > button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *) p,
+    .stApp .st-key-pred_train_button button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *) p,
+    .stApp :where(.stButton, .stFormSubmitButton, .stDownloadButton) > button[kind^="primary"]:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *) p,
+    .stApp :where(.stButton, .stFormSubmitButton, .stDownloadButton) > button[data-testid^="stBaseButton-primary"]:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *) p { color: #06110B; }
+    .stApp :where(.stFormSubmitButton, [data-testid="stFormSubmitButton"]) > button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *):hover,
+    .stApp .st-key-pred_train_button button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *):hover,
+    .stApp :where(.stButton, .stFormSubmitButton, .stDownloadButton) > button[kind^="primary"]:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *):hover,
+    .stApp :where(.stButton, .stFormSubmitButton, .stDownloadButton) > button[data-testid^="stBaseButton-primary"]:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *):hover {
+        background: linear-gradient(135deg, var(--lm-green) 0%, var(--lm-emerald) 100%);
+        border-color: transparent; box-shadow: 0 6px 20px rgba(16,185,129,0.45);
+    }
+    .stApp :where(.stFormSubmitButton, [data-testid="stFormSubmitButton"]) > button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *):active,
+    .stApp .st-key-pred_train_button button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *):active,
+    .stApp :where(.stButton, .stFormSubmitButton, .stDownloadButton) > button[kind^="primary"]:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *):active,
+    .stApp :where(.stButton, .stFormSubmitButton, .stDownloadButton) > button[data-testid^="stBaseButton-primary"]:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *):active { box-shadow: 0 2px 8px rgba(16,185,129,0.30); }
+
+    /* Sidebar buttons keep their Part 2 look; only the shared hover/press motion is added */
+    section[data-testid="stSidebar"] .stButton > button {
+        transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+    }
+    section[data-testid="stSidebar"] .stButton > button:hover { transform: translateY(-1px); }
+    section[data-testid="stSidebar"] .stButton > button:active { transform: translateY(0); }
+
+    /* --- Boundaries: same 1px / 12px language for the remaining controls --- */
+    [data-testid="stExpander"] details {
+        border: 1px solid var(--lm-border); border-radius: 12px; background: rgba(16,32,25,0.55);
+    }
+    [data-testid="stForm"] { border: 1px solid var(--lm-border); border-radius: 12px; }
+    [data-testid="stSelectbox"] [data-baseweb="select"] > div,
+    [data-testid="stMultiSelect"] [data-baseweb="select"] > div,
+    [data-testid="stTextInput"] [data-baseweb="base-input"],
+    [data-testid="stNumberInput"] [data-baseweb="input"] {
+        border-radius: 10px; border-color: var(--lm-border);
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    [data-testid="stSelectbox"] [data-baseweb="select"] > div:hover,
+    [data-testid="stMultiSelect"] [data-baseweb="select"] > div:hover,
+    [data-testid="stTextInput"] [data-baseweb="base-input"]:focus-within,
+    [data-testid="stNumberInput"] [data-baseweb="input"]:focus-within {
+        border-color: var(--lm-border-green);
+    }
+    [data-testid="stMetric"] { transition: border-color 0.15s ease; }
+    [data-testid="stMetric"]:hover { border-color: var(--lm-border-green); }
+
+    /* --- Responsive (mobile only; nothing here widens the page) --- */
+    @media (max-width: 640px) {
+        .stTabs [data-baseweb="tab"] { padding: 0.4rem 0.7rem; font-size: 0.85rem; }
+        :where(.stButton, .stFormSubmitButton, [data-testid="stFormSubmitButton"], .stDownloadButton, [data-testid="stDownloadButton"]) > button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *) { min-height: 2.75rem; padding: 0.5rem 0.9rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .stTabs [data-baseweb="tab"], :where(.stButton, .stFormSubmitButton, [data-testid="stFormSubmitButton"], .stDownloadButton, [data-testid="stDownloadButton"]) > button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *),
+        section[data-testid="stSidebar"] .stButton > button { transition: none; }
+        :where(.stButton, .stFormSubmitButton, [data-testid="stFormSubmitButton"], .stDownloadButton, [data-testid="stDownloadButton"]) > button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *):hover, section[data-testid="stSidebar"] .stButton > button:hover { transform: none; }
     }
     </style>
     """,
@@ -261,8 +498,9 @@ st.markdown(
 # 1) Brand
 # ---------------------------------------------------------------------------
 st.sidebar.markdown(
-    """<p class="lm-brand-title">\U0001F393 LEARNMATE</p>
-    <p class="lm-brand-sub">Analytics AI</p>""",
+    '<div class="lm-brand"><div class="lm-brand-icon">\U0001F4BB</div>'
+    '<div class="lm-brand-text"><p class="lm-brand-title">LEARNMATE</p>'
+    '<p class="lm-brand-sub">Analytics AI</p></div></div>',
     unsafe_allow_html=True,
 )
 st.sidebar.caption("Student Employability & Placement Intelligence Platform")
@@ -270,7 +508,7 @@ st.sidebar.caption("Student Employability & Placement Intelligence Platform")
 # ---------------------------------------------------------------------------
 # 2) Custom grouped navigation - single st.sidebar.radio(), single router.
 # ---------------------------------------------------------------------------
-st.sidebar.markdown('<div class="lm-nav-caption">MAIN</div>', unsafe_allow_html=True)
+st.sidebar.markdown('<div class="lm-nav-caption">INTELLIGENCE</div>', unsafe_allow_html=True)
 page = st.sidebar.radio(
     "Navigate",
     [
@@ -312,7 +550,7 @@ st.sidebar.divider()
 # ---------------------------------------------------------------------------
 # 4) Campus Dataset - upload a campus dataset, or fall back to the benchmark
 # ---------------------------------------------------------------------------
-st.sidebar.markdown("#### \U0001F4C2 Campus Dataset")
+st.sidebar.markdown('<div class="lm-nav-caption">Campus Dataset</div>', unsafe_allow_html=True)
 st.sidebar.caption("Upload a CSV or Excel campus dataset and LearnMate Analytics AI will automatically "
                     "profile the available columns and enable compatible analytics.")
 
@@ -1768,468 +2006,4 @@ def render_whatif_simulator() -> None:
             "to train a generic model on this dataset, or **Reset to Benchmark Dataset** in the sidebar."
         )
         return
-    st.caption("Explore how hypothetical student profiles change model-estimated placement probabilities.")
-    st.info(WHATIF_DATASET_SIZE_NOTE)
-
-    results = get_classification_results(cleaned_df)
-    base = baseline_profile(cleaned_df)
-
-    st.caption(
-        "Baseline values are initialized from the dataset distribution - numeric defaults use the "
-        "median, categorical defaults use the most frequent category. This does not represent a real "
-        "individual student."
-    )
-
-    model_choice = st.selectbox("Model", list(MODEL_REGISTRY.keys()) + ["Compare Both Models"],
-                                 key="whatif_model")
-
-    numeric_feats = CLUSTER_NUMERIC_FEATURES
-    categorical_feats = CLUSTER_CATEGORICAL_FEATURES
-    whatif_keys = [f"whatif_{f}" for f in numeric_feats + categorical_feats]
-
-    if st.button("\U0001F504 Reset What-If"):
-        for k in whatif_keys:
-            st.session_state.pop(k, None)
-        st.rerun()
-
-    st.markdown('<h3 class="lm-section-title">Scenario A - Baseline (fixed)</h3>', unsafe_allow_html=True)
-    a1, a2 = st.columns(2)
-    with a1:
-        for f in numeric_feats:
-            st.caption(f"{WHATIF_FEATURE_LABELS[f]}: {base[f]:.1f}")
-    with a2:
-        for f in categorical_feats:
-            st.caption(f"{WHATIF_FEATURE_LABELS[f]}: {base[f]}")
-
-    st.markdown('<h3 class="lm-section-title">Scenario B - What-If (adjust below)</h3>', unsafe_allow_html=True)
-    whatif = {}
-    b1, b2 = st.columns(2)
-    with b1:
-        for f in numeric_feats:
-            whatif[f] = st.slider(WHATIF_FEATURE_LABELS[f], 0.0, 100.0, base[f], key=f"whatif_{f}")
-    with b2:
-        for f in categorical_feats:
-            options = CATEGORY_OPTIONS[f]
-            default_idx = options.index(base[f]) if base[f] in options else 0
-            whatif[f] = st.selectbox(WHATIF_FEATURE_LABELS[f], options, index=default_idx, key=f"whatif_{f}")
-
-    st.divider()
-
-    models_to_run = list(MODEL_REGISTRY.keys()) if model_choice == "Compare Both Models" else [model_choice]
-    comparisons = {m: compare_scenarios(results, m, base, whatif) for m in models_to_run}
-
-    st.markdown('<h3 class="lm-section-title">Results</h3>', unsafe_allow_html=True)
-    for m, cmp in comparisons.items():
-        st.markdown(f"##### {m}")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Baseline probability", f"{cmp.prob_baseline * 100:.1f}%")
-        c2.metric("What-If probability", f"{cmp.prob_whatif * 100:.1f}%")
-        c3.metric("Change", f"{cmp.diff_pp:+.1f} pp")
-        c4.metric("Predicted class (A -> B)", f"{cmp.class_baseline} -> {cmp.class_whatif}")
-        st.plotly_chart(
-            plot_scenario_probability_comparison(cmp.prob_baseline, cmp.prob_whatif,
-                                                  title=f"{m}: Scenario A vs Scenario B"),
-            use_container_width=True,
-        )
-
-    changes = detect_profile_changes(base, whatif)
-    st.markdown('<h3 class="lm-section-title">Changed inputs</h3>', unsafe_allow_html=True)
-    if not changes:
-        st.info("No changes were made to the What-If scenario.")
-    else:
-        for f, old, new in changes:
-            label = WHATIF_FEATURE_LABELS.get(f, f)
-            if isinstance(old, float):
-                st.write(f"- **{label}**: {old:.1f} \u2192 {new:.1f}")
-            else:
-                st.write(f"- **{label}**: {old} \u2192 {new}")
-
-    st.markdown('<h3 class="lm-section-title">Model interpretation</h3>', unsafe_allow_html=True)
-    for m, cmp in comparisons.items():
-        direction = "higher" if cmp.diff_pp > 0 else ("lower" if cmp.diff_pp < 0 else "the same")
-        multi_note = f" ({len(cmp.changes)} inputs changed together)" if len(cmp.changes) > 1 else ""
-        st.markdown(
-            f"Under **{m}**, the What-If profile has a {direction} model-estimated placement probability "
-            f"than the baseline profile (observed model change: **{cmp.diff_pp:+.1f} percentage points**){multi_note}. "
-            f"This is a difference in model output for these two input profiles - it should not be "
-            f"interpreted as evidence that changing these attributes would causally produce a placement "
-            f"outcome in the real world."
-        )
-
-    st.divider()
-    st.markdown('<h3 class="lm-section-title">Single Variable Experiment</h3>', unsafe_allow_html=True)
-    exp_model = model_choice if model_choice != "Compare Both Models" else list(MODEL_REGISTRY.keys())[0]
-    exp_feature = st.selectbox(
-        "Feature to vary", numeric_feats + categorical_feats,
-        format_func=lambda f: WHATIF_FEATURE_LABELS.get(f, f), key="whatif_exp_feature",
-    )
-    if exp_feature in numeric_feats:
-        curve_df = simulate_single_numeric_feature(results, exp_model, whatif, exp_feature)
-        st.plotly_chart(
-            plot_single_feature_response(curve_df, WHATIF_FEATURE_LABELS[exp_feature],
-                                          current_value=whatif[exp_feature]),
-            use_container_width=True,
-        )
-    else:
-        options = CATEGORY_OPTIONS[exp_feature]
-        cat_df = simulate_categorical_feature(results, exp_model, whatif, exp_feature, options)
-        st.plotly_chart(
-            plot_categorical_scenario_comparison(cat_df, WHATIF_FEATURE_LABELS[exp_feature]),
-            use_container_width=True,
-        )
-    st.caption(
-        f"Model used for this experiment: {exp_model}. All other inputs are held at the current "
-        f"What-If scenario values shown above."
-    )
-
-    st.divider()
-    st.markdown("### Important interpretation")
-    st.warning(WHATIF_LIMITATION_NOTE)
-
-
-# ---------------------------------------------------------------------------
-# PAGE: PROJECT SUMMARY
-# ---------------------------------------------------------------------------
-
-def render_generic_project_summary() -> None:
-    st.title("\U0001F4D8 Project Summary")
-    st.caption("Dataset-Adaptive Campus Analytics Platform")
-    st.markdown(
-        "LearnMate Analytics AI is a **dataset-adaptive campus analytics platform**. It ships with a "
-        "specialized, verified placement-intelligence walkthrough for the bundled campus-placement "
-        "benchmark dataset, and adapts to other structured campus/student datasets with generic "
-        "profiling, exploratory analysis, predictive modelling, and clustering."
-    )
-    st.divider()
-    st.markdown('<h3 class="lm-section-title">Active dataset</h3>', unsafe_allow_html=True)
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Source", active_source_name)
-    c2.metric("Rows", dataset_profile.n_rows)
-    c3.metric("Columns", dataset_profile.n_cols)
-    c4.metric("Mode", "Generic")
-    st.markdown(
-        f"- Numeric columns: {', '.join(dataset_profile.numeric_columns) or 'none'}\n"
-        f"- Categorical columns: {', '.join(dataset_profile.categorical_columns) or 'none'}\n"
-        f"- Identifier-like columns (excluded from modelling by default): "
-        f"{', '.join(dataset_profile.identifier_like_columns) or 'none'}\n"
-        f"- Duplicate rows: {dataset_profile.duplicate_rows}\n"
-        f"- Missing values: {sum(dataset_profile.missing_value_columns.values())} across "
-        f"{len(dataset_profile.missing_value_columns)} column(s)"
-    )
-    semantic = detect_semantic_candidates(raw_df)
-    if semantic:
-        st.markdown("**Detected campus/student concepts (heuristic, for your review):**")
-        for concept, cols in semantic.items():
-            st.write(f"- {concept.replace('_', ' ').title()}: {', '.join(cols)}")
-    st.divider()
-    st.warning(
-        "This dataset does not match the benchmark campus-placement schema, so the specialized "
-        "Stage 1-7 placement/salary report is not shown here. Use **Predictive Analysis** for "
-        "target-driven classification/regression, or **Student Segmentation** for clustering on this "
-        "dataset. Reset to the benchmark dataset (sidebar) to see the full verified project summary."
-    )
-
-
-def render_project_summary() -> None:
-    if not schema_match:
-        render_generic_project_summary()
-        return
-    st.title("\U0001F4D8 Project Summary")
-    st.caption("From Student Data to Employability Intelligence")
-
-    cls_results = get_classification_results(cleaned_df)
-    reg_results = get_regression_results(cleaned_df)
-    seg_diagnostics = get_segmentation_diagnostics(cleaned_df)
-    evidence = get_copilot_evidence(cleaned_df, cls_results, reg_results, seg_diagnostics)
-    d = evidence["dataset"]
-    we = {r["workex"]: r for r in evidence["placement"]["by_workex"]}
-    corr = evidence["academic"]["correlation_with_placement"]
-    seg = evidence["segmentation"]
-
-    # ---- 1. Project overview -------------------------------------------
-    st.markdown('<h3 class="lm-section-title">1. Project Overview</h3>', unsafe_allow_html=True)
-    st.markdown(
-        "LearnMate Analytics AI is a student employability and placement intelligence platform "
-        "that combines data analytics, exploratory data analysis, classification, regression, "
-        "clustering, explainable model evaluation, grounded AI insights, and scenario simulation "
-        "on a real campus-placement dataset. It does not guarantee any individual's employment or "
-        "salary outcome - it demonstrates how raw student records can be turned into transparent, "
-        "verifiable analytics and model-based estimates."
-    )
-
-    # ---- 2. Problem statement -------------------------------------------
-    st.markdown('<h3 class="lm-section-title">2. Problem Statement</h3>', unsafe_allow_html=True)
-    st.markdown(
-        "Student placement datasets contain academic, educational, work-experience and "
-        "specialisation information, but raw tables do not directly provide actionable insights. "
-        "This project transforms the dataset through the pipeline:\n\n"
-        "**DATA \u2192 INSIGHTS \u2192 PREDICTIONS \u2192 SEGMENTS \u2192 SCENARIOS \u2192 ACTIONABLE INTERPRETATION**"
-    )
-
-    # ---- 3. Dataset -------------------------------------------------------
-    st.markdown('<h3 class="lm-section-title">3. Dataset</h3>', unsafe_allow_html=True)
-    st.markdown(
-        f"**{quality.n_rows} students, {quality.n_cols} original columns** "
-        f"(sl_no, gender, ssc_p, ssc_b, hsc_p, hsc_b, hsc_s, degree_p, degree_t, workex, etest_p, "
-        f"specialisation, mba_p, status, salary)."
-    )
-    st.markdown(
-        "- `sl_no` is a row identifier - excluded from every model.\n"
-        "- `gender` is a sensitive attribute - excluded from every predictive model.\n"
-        "- `status` is the placement classification target.\n"
-        "- `salary` is used only for salary regression, and only for placed students.\n"
-        "- `salary` is missing for non-placed students and is **never** used as a placement feature."
-    )
-
-    # ---- 4. Analytics pipeline -------------------------------------------
-    st.markdown('<h3 class="lm-section-title">4. Analytics Pipeline</h3>', unsafe_allow_html=True)
-    pipeline_steps = [
-        ("DATA", "Load the real campus placement CSV as-is."),
-        ("DATA QUALITY", "Validate schema, check duplicates and missing values, prepare a model-ready dataframe."),
-        ("EDA", "Explore placement, academic performance, salary, and relationships between variables."),
-        ("CLASSIFICATION", "Predict placement (Placed / Not Placed) with Logistic Regression and a Decision Tree."),
-        ("REGRESSION", "Estimate salary for placed students with Linear Regression and a Random Forest Regressor."),
-        ("CLUSTERING", "Group students into profiles with K-Means, diagnosed via Elbow and Silhouette analysis."),
-        ("AI INSIGHTS", "Answer analytical questions from verified evidence, with a deterministic no-API fallback."),
-        ("WHAT-IF SIMULATION", "Compare hypothetical student profiles through the existing trained classification model."),
-    ]
-    for i, (step, desc) in enumerate(pipeline_steps):
-        st.markdown(f"**{step}** - {desc}")
-        if i < len(pipeline_steps) - 1:
-            st.markdown("<div style='text-align:center;color:#94A3B8;'>\u2193</div>", unsafe_allow_html=True)
-
-    # ---- 5. Key verified findings -----------------------------------------
-    st.markdown('<h3 class="lm-section-title">5. Key Verified Findings</h3>', unsafe_allow_html=True)
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Total students", d["n_total"])
-    k2.metric("Placed", d["n_placed"])
-    k3.metric("Not placed", d["n_not_placed"])
-    k4.metric("Placement rate", f"{d['placement_rate_pct']}%")
-    sal = evidence["salary"]["stats"]
-    st.markdown(
-        f"- Average salary among placed students: **INR {sal['mean']:,.0f}** "
-        f"(median **INR {sal['median']:,.0f}**), based on {sal['count']} salary records.\n"
-        + (f"- Work experience: **{we['Yes']['placement_rate_pct']}%** observed placement rate "
-           f"(n={int(we['Yes']['total'])}) vs **{we['No']['placement_rate_pct']}%** without "
-           f"(n={int(we['No']['total'])}) - a **{we['Yes']['placement_rate_pct'] - we['No']['placement_rate_pct']:+.1f} "
-           f"percentage point** observed difference.\n" if "Yes" in we and "No" in we else "")
-        + (f"- Academic-feature correlations with salary were all weak (|r| \u2264 "
-           f"{max(abs(v) for v in corr.values()):.2f} for placement; the equivalent salary correlations "
-           f"found during EDA were all |r| \u2264 0.18).\n" if corr else "")
-    )
-    st.caption("These are observed dataset patterns, not causal relationships.")
-
-    # ---- 6. Placement classification --------------------------------------
-    st.markdown('<h3 class="lm-section-title">6. Placement Classification</h3>', unsafe_allow_html=True)
-    st.dataframe(comparison_table(cls_results), use_container_width=True, hide_index=True)
-    st.caption(
-        "These results come from this project's fixed 80/20 train/test evaluation setup "
-        "(random_state=42) and should not be interpreted as universal real-world performance. "
-        "Neither model is labeled as \"the best\" - compare the metrics directly."
-    )
-
-    # ---- 7. Salary regression -----------------------------------------------
-    st.markdown('<h3 class="lm-section-title">7. Salary Regression</h3>', unsafe_allow_html=True)
-    st.markdown(f"Salary records: **{reg_results.n_salary_records}** \u2192 Training: **{reg_results.n_train}**, Test: **{reg_results.n_test}**")
-    st.dataframe(regression_comparison_table(reg_results), use_container_width=True, hide_index=True)
-    st.markdown(
-        "A **negative R\u00b2** means that, on this test split, the model did not outperform a simple "
-        "mean-salary baseline. This is consistent with the weak salary correlations found during EDA - "
-        "the available academic and employability variables do not provide enough signal to accurately "
-        "explain salary variation in this small sample. This result is reported as-is, not hidden."
-    )
-
-    # ---- 8. Student segmentation --------------------------------------------
-    st.markdown('<h3 class="lm-section-title">8. Student Segmentation</h3>', unsafe_allow_html=True)
-    st.markdown(
-        f"Features used: {', '.join(CLUSTER_NUMERIC_FEATURES + CLUSTER_CATEGORICAL_FEATURES)}. "
-        f"Excluded: {', '.join(CLUSTER_EXCLUDED)}.\n\n"
-        f"Tested K = 2-6. Diagnostic-recommended K = **{seg['k']}** "
-        f"(silhouette = **{seg['silhouette_by_k'][seg['k']]:.3f}**)."
-    )
-    for p in seg["profiles"]:
-        st.markdown(f"- **Cluster {p['cluster_id']} - {p['label']}**: {p['count']} students ({p['pct_of_total']}%)")
-    st.caption(
-        "Silhouette scores across K=2-6 are modest (0.12-0.18), meaning these clusters are real but "
-        "not sharply separated. Labels are algorithm-generated descriptions, not absolute rankings."
-    )
-    outcomes = seg.get("post_clustering_outcomes", [])
-    if outcomes:
-        st.markdown("**Post-clustering descriptive outcomes** (NOT used to create the clusters):")
-        for o in outcomes:
-            salary_txt = f", avg salary INR {o['avg_salary_placed']:,.0f} (n={o['salary_sample_size']})" if o.get("avg_salary_placed") else ""
-            st.markdown(f"- Cluster {o['cluster']}: placement rate {o['placement_rate_pct']}%{salary_txt}")
-    st.caption("These outcomes are descriptive post-clustering analysis and do not establish causation.")
-
-    # ---- 9. AI Insight Copilot ---------------------------------------------
-    st.markdown('<h3 class="lm-section-title">9. AI Insight Copilot</h3>', unsafe_allow_html=True)
-    st.markdown(
-        "The Copilot builds a structured evidence registry from this project's own calculated "
-        "statistics and model results first, then answers questions about dataset overview, academic "
-        "relationships, work experience and placement, placement by degree/specialisation, salary "
-        "overview and by specialisation, salary-model performance, classification performance, "
-        "segmentation, main findings, and next investigations - grounded in that evidence.\n\n"
-        "The deterministic fallback engine works with **no API key and no internet access**. An "
-        "optional external LLM layer exists but is not described as connected unless it actually "
-        "succeeds at runtime."
-    )
-
-    # ---- 10. What-If Simulator ----------------------------------------------
-    st.markdown('<h3 class="lm-section-title">10. What-If Simulator</h3>', unsafe_allow_html=True)
-    st.markdown(
-        "The simulator reuses the existing Stage 3 classification pipeline - no new model is trained. "
-        "It compares a baseline profile against a hypothetical profile using `predict_proba()` from "
-        "the already-fitted pipeline. The output is a **model-estimated probability**, not a "
-        "guaranteed placement probability, and does not establish causality."
-    )
-
-    # ---- 11. Responsible data science ----------------------------------------
-    st.markdown('<h3 class="lm-section-title">11. Responsible Data Science</h3>', unsafe_allow_html=True)
-    st.warning(
-        "- Small dataset size (215 records; only 148 with a recorded salary).\n"
-        "- Observational data - no experimental control, so associations are not causal evidence.\n"
-        "- Model uncertainty - metrics come from a single train/test split and may vary with a different one.\n"
-        "- The salary regression models are weak on this dataset (negative R\u00b2).\n"
-        "- Clustering separation is modest (silhouette 0.12-0.18).\n"
-        "- Sensitive/non-predictive fields (`gender`, `sl_no`) are excluded from every predictive model.\n"
-        "- No guarantee of placement or salary is made anywhere in this application.\n"
-        "- A larger, richer dataset (e.g. with company, role, or location data) would be needed for any "
-        "real-world deployment consideration."
-    )
-
-    st.divider()
-    st.caption(
-        "LearnMate Analytics AI - built for the AICTE | IBM SkillsBuild Data Analytics with AI "
-        "Internship 2026, BharatCares. AI-assisted development was used; see README.md for details."
-    )
-
-
-def render_predictive_analysis() -> None:
-    """Generic, target-driven predictive workflow (Part 10): the user picks
-    a target column and a task, the app validates suitability, excludes
-    obvious identifiers, warns about likely leakage columns, then trains
-    the appropriate model(s) live. Works for ANY dataset, including the
-    benchmark one (as an additional, explicit-choice option alongside the
-    fixed Placement/Salary Prediction pages)."""
-    st.title("\U0001F9EC Predictive Analysis")
-    st.caption(f"Target-driven classification/regression for **{active_source_name}**.")
-    st.info(
-        "Select a target column and a task below. Only columns that pass a basic suitability check "
-        "will train - this never guesses a target for you."
-    )
-
-    all_cols = list(cleaned_df.columns)
-    semantic = detect_semantic_candidates(raw_df)
-    hint_cols = set()
-    for concept in ("placement_status", "salary"):
-        hint_cols.update(semantic.get(concept, []))
-    if hint_cols:
-        st.caption(f"Possible target detected (heuristic, not certain): {', '.join(sorted(hint_cols))}")
-
-    s1, s2 = st.columns(2)
-    with s1:
-        target_col = st.selectbox("Target column", all_cols, key="pred_target")
-    with s2:
-        task = st.selectbox("Task", ["Classification", "Regression"], key="pred_task")
-    task_key = "classification" if task == "Classification" else "regression"
-
-    validation_result = validate_generic_target(cleaned_df, target_col, task_key)
-    if not validation_result.ok:
-        st.error(f"This target/task combination is not usable: {validation_result.reason}")
-        return
-
-    candidate_features = [
-        c for c in all_cols
-        if c != target_col and c not in dataset_profile.identifier_like_columns
-    ]
-    default_features = [c for c in candidate_features if c not in dataset_profile.high_cardinality_columns]
-    feature_cols = st.multiselect("Feature columns (identifiers pre-excluded)", candidate_features,
-                                   default=default_features, key="pred_features")
-    if not feature_cols:
-        st.warning("Select at least one feature column.")
-        return
-
-    leakage_warning = suggest_leakage_columns(feature_cols, target_col)
-    if leakage_warning:
-        st.warning(
-            f"These selected feature(s) may contain information that occurs after the target outcome "
-            f"and could cause data leakage: {', '.join(leakage_warning)}. Review before including them."
-        )
-
-    model_options = list(GENERIC_CLASSIFICATION_MODELS.keys()) if task_key == "classification" \
-        else list(GENERIC_REGRESSION_MODELS.keys())
-    model_name = st.selectbox("Model", model_options, key="pred_model")
-
-    if st.button("Train model", key="pred_train_button"):
-        try:
-            if task_key == "classification":
-                result = train_generic_classifier(cleaned_df, target_col, feature_cols, model_name)
-                st.success(f"Trained {model_name} on {result.n_train} rows (tested on {result.n_test}). "
-                           f"Positive class: '{result.positive_label}'.")
-                m1, m2, m3, m4, m5 = st.columns(5)
-                m1.metric("Accuracy", f"{result.metrics['accuracy']:.3f}")
-                m2.metric("Precision", f"{result.metrics['precision']:.3f}")
-                m3.metric("Recall", f"{result.metrics['recall']:.3f}")
-                m4.metric("F1", f"{result.metrics['f1']:.3f}")
-                m5.metric("ROC-AUC", f"{result.metrics['roc_auc']:.3f}" if result.metrics["roc_auc"] is not None else "N/A")
-            else:
-                result = train_generic_regressor(cleaned_df, target_col, feature_cols, model_name)
-                st.success(f"Trained {model_name} on {result.n_train} rows (tested on {result.n_test}).")
-                m1, m2, m3 = st.columns(3)
-                m1.metric("MAE", f"{result.metrics['mae']:,.2f}")
-                m2.metric("RMSE", f"{result.metrics['rmse']:,.2f}")
-                m3.metric("R\u00b2", f"{result.metrics['r2']:.3f}")
-                if result.metrics["r2"] < 0:
-                    st.caption(
-                        "A negative R\u00b2 means this model did not outperform a simple mean-value "
-                        "baseline on this test split - a genuine result, not an error."
-                    )
-            st.caption(
-                "These results come from a single 80/20 train/test split (random_state=42) on this "
-                "dataset and should be treated as an exploratory, educational result - not a "
-                "production benchmark."
-            )
-        except Exception as e:
-            st.error(f"Could not train this model: {e}")
-
-
-# ---------------------------------------------------------------------------
-# Router
-# ---------------------------------------------------------------------------
-
-if page == "Overview":
-    render_overview()
-elif page == "Data Explorer":
-    render_data_explorer()
-elif page == "Exploratory Data Analysis":
-    render_eda()
-elif page == "\U0001F9E9 Student Segmentation":
-    render_student_segmentation()
-elif page == "\U0001F9E0 AI Insight Copilot":
-    render_ai_copilot()
-elif page == "\U0001F3AF What-If Simulator":
-    render_whatif_simulator()
-elif page == "\U0001F9EC Predictive Analysis":
-    render_predictive_analysis()
-elif page == "\U0001F916 Placement Prediction":
-    render_placement_prediction()
-elif page == "\U0001F916 Salary Prediction":
-    render_salary_prediction()
-elif page == "\U0001F916 Model Evaluation":
-    render_model_evaluation()
-elif page == "\U0001F4D8 Project Summary":
-    render_project_summary()
-elif page == "\U0001F1EE\U0001F1F3 Government Services":
-    render_government_services_page()
-
-# ---------------------------------------------------------------------------
-# AI CHATBOT - rendered after the router, on every page, gated by the one
-# existing sidebar toggle (st.session_state["chatbot_enabled"], Part 2).
-# Not a nav item / router branch - an integrated panel, not a new page.
-# ---------------------------------------------------------------------------
-if st.session_state.get("chatbot_enabled", True):
-    render_chatbot_panel(
-        chatbot_respond,
-        CHATBOT_QUICK_PROMPTS,
-        subtitle=f"Ask questions about the active dataset ({active_source_name}).",
-    )
+    st.
