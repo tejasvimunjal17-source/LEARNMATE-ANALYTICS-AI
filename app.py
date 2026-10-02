@@ -1756,7 +1756,7 @@ def render_ai_copilot() -> None:
 
     secrets_key = None
     try:
-        secrets_key = st.secrets.get("ANTHROPIC_API_KEY")
+        secrets_key = st.secrets.get("OPENROUTER_API_KEY")
     except Exception:
         secrets_key = None
     api_key = get_configured_api_key(secrets_key)
@@ -1973,7 +1973,7 @@ def chatbot_respond(question: str) -> str:
 
         secrets_key = None
         try:
-            secrets_key = st.secrets.get("ANTHROPIC_API_KEY")
+            secrets_key = st.secrets.get("OPENROUTER_API_KEY")
         except Exception:
             secrets_key = None
         api_key = get_configured_api_key(secrets_key)
