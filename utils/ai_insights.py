@@ -14,7 +14,7 @@ evidence into a grounded FACT/INSIGHT/POSSIBLE ACTION/LIMITATION answer with
 NO external dependency - it works with no internet access and no API key.
 
 An OPTIONAL LLM layer (`call_llm`) can rephrase/explain the SAME evidence
-using the Anthropic Messages API, called via the Python standard library
+using the OpenRouter chat-completions API, called via the Python standard library
 only (urllib) so no new package is required. If no API key is configured,
 or the call fails for any reason (no network, bad key, timeout, ...), the
 deterministic fallback is used silently - the app never errors just because
@@ -491,15 +491,14 @@ QUICK_QUESTIONS = [
 # 3. OPTIONAL LLM LAYER (stdlib-only, best-effort, silent fallback)
 # ===========================================================================
 
-ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_MODEL = "claude-3-5-haiku-20241022"
-ANTHROPIC_VERSION = "2023-06-01"
+OPENROUTER_BASE_URL = os.environ.get("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1"
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL") or "openai/gpt-4o-mini"
 
 
 def get_configured_api_key(secrets_value: str | None = None) -> str | None:
     """Checks (in order) a value passed in from st.secrets, then the
-    ANTHROPIC_API_KEY environment variable. Never hard-codes a key."""
-    return secrets_value or os.environ.get("ANTHROPIC_API_KEY") or None
+    OPENROUTER_API_KEY environment variable. Never hard-codes a key."""
+    return secrets_value or os.environ.get("OPENROUTER_API_KEY") or None
 
 
 def build_llm_prompt(question: str, fallback: dict) -> str:
@@ -515,34 +514,33 @@ def build_llm_prompt(question: str, fallback: dict) -> str:
     )
 
 
-def call_llm(question: str, fallback: dict, api_key: str, timeout: float = 8.0) -> str | None:
-    """Best-effort optional call to the Anthropic Messages API using only
-    the Python standard library (urllib) - no extra pip dependency. Returns
-    None on ANY failure (no network, invalid key, timeout, malformed
-    response, ...) so the caller falls back to the deterministic engine
-    silently, with no error shown to the user."""
+def call_llm(question: str, fallback: dict, api_key: str, timeout: float = 15.0) -> str | None:
+    """Best-effort optional call to the OpenRouter chat-completions API
+    (OpenAI-compatible) using only the Python standard library (urllib) - no
+    extra pip dependency. Returns None on ANY failure (no network, invalid
+    key, timeout, malformed response, ...) so the caller falls back to the
+    deterministic engine silently, with no error shown to the user."""
     prompt = build_llm_prompt(question, fallback)
     payload = json.dumps({
-        "model": ANTHROPIC_MODEL,
+        "model": OPENROUTER_MODEL,
         "max_tokens": 500,
         "messages": [{"role": "user", "content": prompt}],
     }).encode("utf-8")
     request = urllib.request.Request(
-        ANTHROPIC_API_URL, data=payload, method="POST",
+        OPENROUTER_BASE_URL.rstrip("/") + "/chat/completions", data=payload, method="POST",
         headers={
-            "content-type": "application/json",
-            "x-api-key": api_key,
-            "anthropic-version": ANTHROPIC_VERSION,
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "X-Title": "LearnMate Analytics AI",
         },
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as resp:
             body = json.loads(resp.read().decode("utf-8"))
-        text = "".join(
-            block.get("text", "") for block in body.get("content", []) if block.get("type") == "text"
-        ).strip()
+        text = (body["choices"][0]["message"]["content"] or "").strip()
         return text or None
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, KeyError, OSError):
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError,
+            KeyError, IndexError, TypeError, AttributeError, OSError):
         return None
 
 
