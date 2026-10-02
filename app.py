@@ -2006,4 +2006,468 @@ def render_whatif_simulator() -> None:
             "to train a generic model on this dataset, or **Reset to Benchmark Dataset** in the sidebar."
         )
         return
-    st.
+    st.caption("Explore how hypothetical student profiles change model-estimated placement probabilities.")
+    st.info(WHATIF_DATASET_SIZE_NOTE)
+
+    results = get_classification_results(cleaned_df)
+    base = baseline_profile(cleaned_df)
+
+    st.caption(
+        "Baseline values are initialized from the dataset distribution - numeric defaults use the "
+        "median, categorical defaults use the most frequent category. This does not represent a real "
+        "individual student."
+    )
+
+    model_choice = st.selectbox("Model", list(MODEL_REGISTRY.keys()) + ["Compare Both Models"],
+                                 key="whatif_model")
+
+    numeric_feats = CLUSTER_NUMERIC_FEATURES
+    categorical_feats = CLUSTER_CATEGORICAL_FEATURES
+    whatif_keys = [f"whatif_{f}" for f in numeric_feats + categorical_feats]
+
+    if st.button("\U0001F504 Reset What-If"):
+        for k in whatif_keys:
+            st.session_state.pop(k, None)
+        st.rerun()
+
+    st.markdown('<h3 class="lm-section-title">Scenario A - Baseline (fixed)</h3>', unsafe_allow_html=True)
+    a1, a2 = st.columns(2)
+    with a1:
+        for f in numeric_feats:
+            st.caption(f"{WHATIF_FEATURE_LABELS[f]}: {base[f]:.1f}")
+    with a2:
+        for f in categorical_feats:
+            st.caption(f"{WHATIF_FEATURE_LABELS[f]}: {base[f]}")
+
+    st.markdown('<h3 class="lm-section-title">Scenario B - What-If (adjust below)</h3>', unsafe_allow_html=True)
+    whatif = {}
+    b1, b2 = st.columns(2)
+    with b1:
+        for f in numeric_feats:
+            whatif[f] = st.slider(WHATIF_FEATURE_LABELS[f], 0.0, 100.0, base[f], key=f"whatif_{f}")
+    with b2:
+        for f in categorical_feats:
+            options = CATEGORY_OPTIONS[f]
+            default_idx = options.index(base[f]) if base[f] in options else 0
+            whatif[f] = st.selectbox(WHATIF_FEATURE_LABELS[f], options, index=default_idx, key=f"whatif_{f}")
+
+    st.divider()
+
+    models_to_run = list(MODEL_REGISTRY.keys()) if model_choice == "Compare Both Models" else [model_choice]
+    comparisons = {m: compare_scenarios(results, m, base, whatif) for m in models_to_run}
+
+    st.markdown('<h3 class="lm-section-title">Results</h3>', unsafe_allow_html=True)
+    for m, cmp in comparisons.items():
+        st.markdown(f"##### {m}")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Baseline probability", f"{cmp.prob_baseline * 100:.1f}%")
+        c2.metric("What-If probability", f"{cmp.prob_whatif * 100:.1f}%")
+        c3.metric("Change", f"{cmp.diff_pp:+.1f} pp")
+        c4.metric("Predicted class (A -> B)", f"{cmp.class_baseline} -> {cmp.class_whatif}")
+        st.plotly_chart(
+            plot_scenario_probability_comparison(cmp.prob_baseline, cmp.prob_whatif,
+                                                  title=f"{m}: Scenario A vs Scenario B"),
+            use_container_width=True,
+        )
+
+    changes = detect_profile_changes(base, whatif)
+    st.markdown('<h3 class="lm-section-title">Changed inputs</h3>', unsafe_allow_html=True)
+    if not changes:
+        st.info("No changes were made to the What-If scenario.")
+    else:
+        for f, old, new in changes:
+            label = WHATIF_FEATURE_LABELS.get(f, f)
+            if isinstance(old, float):
+                st.write(f"- **{label}**: {old:.1f} \u2192 {new:.1f}")
+            else:
+                st.write(f"- **{label}**: {old} \u2192 {new}")
+
+    st.markdown('<h3 class="lm-section-title">Model interpretation</h3>', unsafe_allow_html=True)
+    for m, cmp in comparisons.items():
+        direction = "higher" if cmp.diff_pp > 0 else ("lower" if cmp.diff_pp < 0 else "the same")
+        multi_note = f" ({len(cmp.changes)} inputs changed together)" if len(cmp.changes) > 1 else ""
+        st.markdown(
+            f"Under **{m}**, the What-If profile has a {direction} model-estimated placement probability "
+            f"than the baseline profile (observed model change: **{cmp.diff_pp:+.1f} percentage points**){multi_note}. "
+            f"This is a difference in model output for these two input profiles - it should not be "
+            f"interpreted as evidence that changing these attributes would causally produce a placement "
+            f"outcome in the real world."
+        )
+
+    st.divider()
+    st.markdown('<h3 class="lm-section-title">Single Variable Experiment</h3>', unsafe_allow_html=True)
+    exp_model = model_choice if model_choice != "Compare Both Models" else list(MODEL_REGISTRY.keys())[0]
+    exp_feature = st.selectbox(
+        "Feature to vary", numeric_feats + categorical_feats,
+        format_func=lambda f: WHATIF_FEATURE_LABELS.get(f, f), key="whatif_exp_feature",
+    )
+    if exp_feature in numeric_feats:
+        curve_df = simulate_single_numeric_feature(results, exp_model, whatif, exp_feature)
+        st.plotly_chart(
+            plot_single_feature_response(curve_df, WHATIF_FEATURE_LABELS[exp_feature],
+                                          current_value=whatif[exp_feature]),
+            use_container_width=True,
+        )
+    else:
+        options = CATEGORY_OPTIONS[exp_feature]
+        cat_df = simulate_categorical_feature(results, exp_model, whatif, exp_feature, options)
+        st.plotly_chart(
+            plot_categorical_scenario_comparison(cat_df, WHATIF_FEATURE_LABELS[exp_feature]),
+            use_container_width=True,
+        )
+    st.caption(
+        f"Model used for this experiment: {exp_model}. All other inputs are held at the current "
+        f"What-If scenario values shown above."
+    )
+
+    st.divider()
+    st.markdown("### Important interpretation")
+    st.warning(WHATIF_LIMITATION_NOTE)
+
+
+# ---------------------------------------------------------------------------
+# PAGE: PROJECT SUMMARY
+# ---------------------------------------------------------------------------
+
+def render_generic_project_summary() -> None:
+    st.title("\U0001F4D8 Project Summary")
+    st.caption("Dataset-Adaptive Campus Analytics Platform")
+    st.markdown(
+        "LearnMate Analytics AI is a **dataset-adaptive campus analytics platform**. It ships with a "
+        "specialized, verified placement-intelligence walkthrough for the bundled campus-placement "
+        "benchmark dataset, and adapts to other structured campus/student datasets with generic "
+        "profiling, exploratory analysis, predictive modelling, and clustering."
+    )
+    st.divider()
+    st.markdown('<h3 class="lm-section-title">Active dataset</h3>', unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Source", active_source_name)
+    c2.metric("Rows", dataset_profile.n_rows)
+    c3.metric("Columns", dataset_profile.n_cols)
+    c4.metric("Mode", "Generic")
+    st.markdown(
+        f"- Numeric columns: {', '.join(dataset_profile.numeric_columns) or 'none'}\n"
+        f"- Categorical columns: {', '.join(dataset_profile.categorical_columns) or 'none'}\n"
+        f"- Identifier-like columns (excluded from modelling by default): "
+        f"{', '.join(dataset_profile.identifier_like_columns) or 'none'}\n"
+        f"- Duplicate rows: {dataset_profile.duplicate_rows}\n"
+        f"- Missing values: {sum(dataset_profile.missing_value_columns.values())} across "
+        f"{len(dataset_profile.missing_value_columns)} column(s)"
+    )
+    semantic = detect_semantic_candidates(raw_df)
+    if semantic:
+        st.markdown("**Detected campus/student concepts (heuristic, for your review):**")
+        for concept, cols in semantic.items():
+            st.write(f"- {concept.replace('_', ' ').title()}: {', '.join(cols)}")
+    st.divider()
+    st.warning(
+        "This dataset does not match the benchmark campus-placement schema, so the specialized "
+        "Stage 1-7 placement/salary report is not shown here. Use **Predictive Analysis** for "
+        "target-driven classification/regression, or **Student Segmentation** for clustering on this "
+        "dataset. Reset to the benchmark dataset (sidebar) to see the full verified project summary."
+    )
+
+
+def render_project_summary() -> None:
+    if not schema_match:
+        render_generic_project_summary()
+        return
+    st.title("\U0001F4D8 Project Summary")
+    st.caption("From Student Data to Employability Intelligence")
+
+    cls_results = get_classification_results(cleaned_df)
+    reg_results = get_regression_results(cleaned_df)
+    seg_diagnostics = get_segmentation_diagnostics(cleaned_df)
+    evidence = get_copilot_evidence(cleaned_df, cls_results, reg_results, seg_diagnostics)
+    d = evidence["dataset"]
+    we = {r["workex"]: r for r in evidence["placement"]["by_workex"]}
+    corr = evidence["academic"]["correlation_with_placement"]
+    seg = evidence["segmentation"]
+
+    # ---- 1. Project overview -------------------------------------------
+    st.markdown('<h3 class="lm-section-title">1. Project Overview</h3>', unsafe_allow_html=True)
+    st.markdown(
+        "LearnMate Analytics AI is a student employability and placement intelligence platform "
+        "that combines data analytics, exploratory data analysis, classification, regression, "
+        "clustering, explainable model evaluation, grounded AI insights, and scenario simulation "
+        "on a real campus-placement dataset. It does not guarantee any individual's employment or "
+        "salary outcome - it demonstrates how raw student records can be turned into transparent, "
+        "verifiable analytics and model-based estimates."
+    )
+
+    # ---- 2. Problem statement -------------------------------------------
+    st.markdown('<h3 class="lm-section-title">2. Problem Statement</h3>', unsafe_allow_html=True)
+    st.markdown(
+        "Student placement datasets contain academic, educational, work-experience and "
+        "specialisation information, but raw tables do not directly provide actionable insights. "
+        "This project transforms the dataset through the pipeline:\n\n"
+        "**DATA \u2192 INSIGHTS \u2192 PREDICTIONS \u2192 SEGMENTS \u2192 SCENARIOS \u2192 ACTIONABLE INTERPRETATION**"
+    )
+
+    # ---- 3. Dataset -------------------------------------------------------
+    st.markdown('<h3 class="lm-section-title">3. Dataset</h3>', unsafe_allow_html=True)
+    st.markdown(
+        f"**{quality.n_rows} students, {quality.n_cols} original columns** "
+        f"(sl_no, gender, ssc_p, ssc_b, hsc_p, hsc_b, hsc_s, degree_p, degree_t, workex, etest_p, "
+        f"specialisation, mba_p, status, salary)."
+    )
+    st.markdown(
+        "- `sl_no` is a row identifier - excluded from every model.\n"
+        "- `gender` is a sensitive attribute - excluded from every predictive model.\n"
+        "- `status` is the placement classification target.\n"
+        "- `salary` is used only for salary regression, and only for placed students.\n"
+        "- `salary` is missing for non-placed students and is **never** used as a placement feature."
+    )
+
+    # ---- 4. Analytics pipeline -------------------------------------------
+    st.markdown('<h3 class="lm-section-title">4. Analytics Pipeline</h3>', unsafe_allow_html=True)
+    pipeline_steps = [
+        ("DATA", "Load the real campus placement CSV as-is."),
+        ("DATA QUALITY", "Validate schema, check duplicates and missing values, prepare a model-ready dataframe."),
+        ("EDA", "Explore placement, academic performance, salary, and relationships between variables."),
+        ("CLASSIFICATION", "Predict placement (Placed / Not Placed) with Logistic Regression and a Decision Tree."),
+        ("REGRESSION", "Estimate salary for placed students with Linear Regression and a Random Forest Regressor."),
+        ("CLUSTERING", "Group students into profiles with K-Means, diagnosed via Elbow and Silhouette analysis."),
+        ("AI INSIGHTS", "Answer analytical questions from verified evidence, with a deterministic no-API fallback."),
+        ("WHAT-IF SIMULATION", "Compare hypothetical student profiles through the existing trained classification model."),
+    ]
+    for i, (step, desc) in enumerate(pipeline_steps):
+        st.markdown(f"**{step}** - {desc}")
+        if i < len(pipeline_steps) - 1:
+            st.markdown("<div style='text-align:center;color:#94A3B8;'>\u2193</div>", unsafe_allow_html=True)
+
+    # ---- 5. Key verified findings -----------------------------------------
+    st.markdown('<h3 class="lm-section-title">5. Key Verified Findings</h3>', unsafe_allow_html=True)
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Total students", d["n_total"])
+    k2.metric("Placed", d["n_placed"])
+    k3.metric("Not placed", d["n_not_placed"])
+    k4.metric("Placement rate", f"{d['placement_rate_pct']}%")
+    sal = evidence["salary"]["stats"]
+    st.markdown(
+        f"- Average salary among placed students: **INR {sal['mean']:,.0f}** "
+        f"(median **INR {sal['median']:,.0f}**), based on {sal['count']} salary records.\n"
+        + (f"- Work experience: **{we['Yes']['placement_rate_pct']}%** observed placement rate "
+           f"(n={int(we['Yes']['total'])}) vs **{we['No']['placement_rate_pct']}%** without "
+           f"(n={int(we['No']['total'])}) - a **{we['Yes']['placement_rate_pct'] - we['No']['placement_rate_pct']:+.1f} "
+           f"percentage point** observed difference.\n" if "Yes" in we and "No" in we else "")
+        + (f"- Academic-feature correlations with salary were all weak (|r| \u2264 "
+           f"{max(abs(v) for v in corr.values()):.2f} for placement; the equivalent salary correlations "
+           f"found during EDA were all |r| \u2264 0.18).\n" if corr else "")
+    )
+    st.caption("These are observed dataset patterns, not causal relationships.")
+
+    # ---- 6. Placement classification --------------------------------------
+    st.markdown('<h3 class="lm-section-title">6. Placement Classification</h3>', unsafe_allow_html=True)
+    st.dataframe(comparison_table(cls_results), use_container_width=True, hide_index=True)
+    st.caption(
+        "These results come from this project's fixed 80/20 train/test evaluation setup "
+        "(random_state=42) and should not be interpreted as universal real-world performance. "
+        "Neither model is labeled as \"the best\" - compare the metrics directly."
+    )
+
+    # ---- 7. Salary regression -----------------------------------------------
+    st.markdown('<h3 class="lm-section-title">7. Salary Regression</h3>', unsafe_allow_html=True)
+    st.markdown(f"Salary records: **{reg_results.n_salary_records}** \u2192 Training: **{reg_results.n_train}**, Test: **{reg_results.n_test}**")
+    st.dataframe(regression_comparison_table(reg_results), use_container_width=True, hide_index=True)
+    st.markdown(
+        "A **negative R\u00b2** means that, on this test split, the model did not outperform a simple "
+        "mean-salary baseline. This is consistent with the weak salary correlations found during EDA - "
+        "the available academic and employability variables do not provide enough signal to accurately "
+        "explain salary variation in this small sample. This result is reported as-is, not hidden."
+    )
+
+    # ---- 8. Student segmentation --------------------------------------------
+    st.markdown('<h3 class="lm-section-title">8. Student Segmentation</h3>', unsafe_allow_html=True)
+    st.markdown(
+        f"Features used: {', '.join(CLUSTER_NUMERIC_FEATURES + CLUSTER_CATEGORICAL_FEATURES)}. "
+        f"Excluded: {', '.join(CLUSTER_EXCLUDED)}.\n\n"
+        f"Tested K = 2-6. Diagnostic-recommended K = **{seg['k']}** "
+        f"(silhouette = **{seg['silhouette_by_k'][seg['k']]:.3f}**)."
+    )
+    for p in seg["profiles"]:
+        st.markdown(f"- **Cluster {p['cluster_id']} - {p['label']}**: {p['count']} students ({p['pct_of_total']}%)")
+    st.caption(
+        "Silhouette scores across K=2-6 are modest (0.12-0.18), meaning these clusters are real but "
+        "not sharply separated. Labels are algorithm-generated descriptions, not absolute rankings."
+    )
+    outcomes = seg.get("post_clustering_outcomes", [])
+    if outcomes:
+        st.markdown("**Post-clustering descriptive outcomes** (NOT used to create the clusters):")
+        for o in outcomes:
+            salary_txt = f", avg salary INR {o['avg_salary_placed']:,.0f} (n={o['salary_sample_size']})" if o.get("avg_salary_placed") else ""
+            st.markdown(f"- Cluster {o['cluster']}: placement rate {o['placement_rate_pct']}%{salary_txt}")
+    st.caption("These outcomes are descriptive post-clustering analysis and do not establish causation.")
+
+    # ---- 9. AI Insight Copilot ---------------------------------------------
+    st.markdown('<h3 class="lm-section-title">9. AI Insight Copilot</h3>', unsafe_allow_html=True)
+    st.markdown(
+        "The Copilot builds a structured evidence registry from this project's own calculated "
+        "statistics and model results first, then answers questions about dataset overview, academic "
+        "relationships, work experience and placement, placement by degree/specialisation, salary "
+        "overview and by specialisation, salary-model performance, classification performance, "
+        "segmentation, main findings, and next investigations - grounded in that evidence.\n\n"
+        "The deterministic fallback engine works with **no API key and no internet access**. An "
+        "optional external LLM layer exists but is not described as connected unless it actually "
+        "succeeds at runtime."
+    )
+
+    # ---- 10. What-If Simulator ----------------------------------------------
+    st.markdown('<h3 class="lm-section-title">10. What-If Simulator</h3>', unsafe_allow_html=True)
+    st.markdown(
+        "The simulator reuses the existing Stage 3 classification pipeline - no new model is trained. "
+        "It compares a baseline profile against a hypothetical profile using `predict_proba()` from "
+        "the already-fitted pipeline. The output is a **model-estimated probability**, not a "
+        "guaranteed placement probability, and does not establish causality."
+    )
+
+    # ---- 11. Responsible data science ----------------------------------------
+    st.markdown('<h3 class="lm-section-title">11. Responsible Data Science</h3>', unsafe_allow_html=True)
+    st.warning(
+        "- Small dataset size (215 records; only 148 with a recorded salary).\n"
+        "- Observational data - no experimental control, so associations are not causal evidence.\n"
+        "- Model uncertainty - metrics come from a single train/test split and may vary with a different one.\n"
+        "- The salary regression models are weak on this dataset (negative R\u00b2).\n"
+        "- Clustering separation is modest (silhouette 0.12-0.18).\n"
+        "- Sensitive/non-predictive fields (`gender`, `sl_no`) are excluded from every predictive model.\n"
+        "- No guarantee of placement or salary is made anywhere in this application.\n"
+        "- A larger, richer dataset (e.g. with company, role, or location data) would be needed for any "
+        "real-world deployment consideration."
+    )
+
+    st.divider()
+    st.caption(
+        "LearnMate Analytics AI - built for the AICTE | IBM SkillsBuild Data Analytics with AI "
+        "Internship 2026, BharatCares. AI-assisted development was used; see README.md for details."
+    )
+
+
+def render_predictive_analysis() -> None:
+    """Generic, target-driven predictive workflow (Part 10): the user picks
+    a target column and a task, the app validates suitability, excludes
+    obvious identifiers, warns about likely leakage columns, then trains
+    the appropriate model(s) live. Works for ANY dataset, including the
+    benchmark one (as an additional, explicit-choice option alongside the
+    fixed Placement/Salary Prediction pages)."""
+    st.title("\U0001F9EC Predictive Analysis")
+    st.caption(f"Target-driven classification/regression for **{active_source_name}**.")
+    st.info(
+        "Select a target column and a task below. Only columns that pass a basic suitability check "
+        "will train - this never guesses a target for you."
+    )
+
+    all_cols = list(cleaned_df.columns)
+    semantic = detect_semantic_candidates(raw_df)
+    hint_cols = set()
+    for concept in ("placement_status", "salary"):
+        hint_cols.update(semantic.get(concept, []))
+    if hint_cols:
+        st.caption(f"Possible target detected (heuristic, not certain): {', '.join(sorted(hint_cols))}")
+
+    s1, s2 = st.columns(2)
+    with s1:
+        target_col = st.selectbox("Target column", all_cols, key="pred_target")
+    with s2:
+        task = st.selectbox("Task", ["Classification", "Regression"], key="pred_task")
+    task_key = "classification" if task == "Classification" else "regression"
+
+    validation_result = validate_generic_target(cleaned_df, target_col, task_key)
+    if not validation_result.ok:
+        st.error(f"This target/task combination is not usable: {validation_result.reason}")
+        return
+
+    candidate_features = [
+        c for c in all_cols
+        if c != target_col and c not in dataset_profile.identifier_like_columns
+    ]
+    default_features = [c for c in candidate_features if c not in dataset_profile.high_cardinality_columns]
+    feature_cols = st.multiselect("Feature columns (identifiers pre-excluded)", candidate_features,
+                                   default=default_features, key="pred_features")
+    if not feature_cols:
+        st.warning("Select at least one feature column.")
+        return
+
+    leakage_warning = suggest_leakage_columns(feature_cols, target_col)
+    if leakage_warning:
+        st.warning(
+            f"These selected feature(s) may contain information that occurs after the target outcome "
+            f"and could cause data leakage: {', '.join(leakage_warning)}. Review before including them."
+        )
+
+    model_options = list(GENERIC_CLASSIFICATION_MODELS.keys()) if task_key == "classification" \
+        else list(GENERIC_REGRESSION_MODELS.keys())
+    model_name = st.selectbox("Model", model_options, key="pred_model")
+
+    if st.button("Train model", key="pred_train_button"):
+        try:
+            if task_key == "classification":
+                result = train_generic_classifier(cleaned_df, target_col, feature_cols, model_name)
+                st.success(f"Trained {model_name} on {result.n_train} rows (tested on {result.n_test}). "
+                           f"Positive class: '{result.positive_label}'.")
+                m1, m2, m3, m4, m5 = st.columns(5)
+                m1.metric("Accuracy", f"{result.metrics['accuracy']:.3f}")
+                m2.metric("Precision", f"{result.metrics['precision']:.3f}")
+                m3.metric("Recall", f"{result.metrics['recall']:.3f}")
+                m4.metric("F1", f"{result.metrics['f1']:.3f}")
+                m5.metric("ROC-AUC", f"{result.metrics['roc_auc']:.3f}" if result.metrics["roc_auc"] is not None else "N/A")
+            else:
+                result = train_generic_regressor(cleaned_df, target_col, feature_cols, model_name)
+                st.success(f"Trained {model_name} on {result.n_train} rows (tested on {result.n_test}).")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("MAE", f"{result.metrics['mae']:,.2f}")
+                m2.metric("RMSE", f"{result.metrics['rmse']:,.2f}")
+                m3.metric("R\u00b2", f"{result.metrics['r2']:.3f}")
+                if result.metrics["r2"] < 0:
+                    st.caption(
+                        "A negative R\u00b2 means this model did not outperform a simple mean-value "
+                        "baseline on this test split - a genuine result, not an error."
+                    )
+            st.caption(
+                "These results come from a single 80/20 train/test split (random_state=42) on this "
+                "dataset and should be treated as an exploratory, educational result - not a "
+                "production benchmark."
+            )
+        except Exception as e:
+            st.error(f"Could not train this model: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Router
+# ---------------------------------------------------------------------------
+
+if page == "Overview":
+    render_overview()
+elif page == "Data Explorer":
+    render_data_explorer()
+elif page == "Exploratory Data Analysis":
+    render_eda()
+elif page == "\U0001F9E9 Student Segmentation":
+    render_student_segmentation()
+elif page == "\U0001F9E0 AI Insight Copilot":
+    render_ai_copilot()
+elif page == "\U0001F3AF What-If Simulator":
+    render_whatif_simulator()
+elif page == "\U0001F9EC Predictive Analysis":
+    render_predictive_analysis()
+elif page == "\U0001F916 Placement Prediction":
+    render_placement_prediction()
+elif page == "\U0001F916 Salary Prediction":
+    render_salary_prediction()
+elif page == "\U0001F916 Model Evaluation":
+    render_model_evaluation()
+elif page == "\U0001F4D8 Project Summary":
+    render_project_summary()
+elif page == "\U0001F1EE\U0001F1F3 Government Services":
+    render_government_services_page()
+
+# ---------------------------------------------------------------------------
+# AI CHATBOT - rendered after the router, on every page, gated by the one
+# existing sidebar toggle (st.session_state["chatbot_enabled"], Part 2).
+# Not a nav item / router branch - an integrated panel, not a new page.
+# ---------------------------------------------------------------------------
+if st.session_state.get("chatbot_enabled", True):
+    render_chatbot_panel(
+        chatbot_respond,
+        CHATBOT_QUICK_PROMPTS,
+        subtitle=f"Ask questions about the active dataset ({active_source_name}).",
+)
