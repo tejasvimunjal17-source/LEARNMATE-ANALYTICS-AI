@@ -514,20 +514,20 @@ def build_llm_prompt(question: str, fallback: dict) -> str:
     )
 
 
-def call_llm(question: str, fallback: dict, api_key: str, timeout: float = 15.0) -> str | None:
-    """Best-effort optional call to the OpenRouter chat-completions API
-    (OpenAI-compatible) using only the Python standard library (urllib) - no
-    extra pip dependency. Returns None on ANY failure (no network, invalid
-    key, timeout, malformed response, ...) so the caller falls back to the
-    deterministic engine silently, with no error shown to the user."""
-    prompt = build_llm_prompt(question, fallback)
-    payload = json.dumps({
-        "model": OPENROUTER_MODEL,
-        "max_tokens": 500,
-        "messages": [{"role": "user", "content": prompt}],
-    }).encode("utf-8")
+def _openrouter_chat(messages: list[dict], api_key: str, timeout: float = 15.0,
+                     max_tokens: int = 500, temperature: float | None = None) -> str | None:
+    """The ONE place OpenRouter is called (benchmark Copilot AND generic
+    Copilot share it). OpenAI-compatible chat-completions, standard library
+    only. Returns the reply text, or None on ANY failure (no network, bad
+    key, timeout, malformed/empty response) so callers fall back silently.
+    The key is only ever placed in the Authorization header - never logged,
+    returned, or put in a prompt."""
+    body: dict = {"model": OPENROUTER_MODEL, "max_tokens": max_tokens, "messages": messages}
+    if temperature is not None:
+        body["temperature"] = temperature
     request = urllib.request.Request(
-        OPENROUTER_BASE_URL.rstrip("/") + "/chat/completions", data=payload, method="POST",
+        OPENROUTER_BASE_URL.rstrip("/") + "/chat/completions",
+        data=json.dumps(body).encode("utf-8"), method="POST",
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
@@ -536,12 +536,19 @@ def call_llm(question: str, fallback: dict, api_key: str, timeout: float = 15.0)
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-        text = (body["choices"][0]["message"]["content"] or "").strip()
+            payload = json.loads(resp.read().decode("utf-8"))
+        text = (payload["choices"][0]["message"]["content"] or "").strip()
         return text or None
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError,
             KeyError, IndexError, TypeError, AttributeError, OSError):
         return None
+
+
+def call_llm(question: str, fallback: dict, api_key: str, timeout: float = 15.0) -> str | None:
+    """Best-effort optional OpenRouter call for the BENCHMARK Copilot.
+    Returns None on any failure so the caller uses the deterministic engine."""
+    prompt = build_llm_prompt(question, fallback)
+    return _openrouter_chat([{"role": "user", "content": prompt}], api_key, timeout=timeout, max_tokens=500)
 
 
 def generate_response(question: str, evidence: dict, api_key: str | None = None) -> dict:
