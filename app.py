@@ -256,8 +256,8 @@ st.markdown(
     }
     .lm-dataset-card b { color: var(--lm-green); }
     .lm-nav-caption {
-        font-size: 0.66rem; font-weight: 700; letter-spacing: 0.09em; color: var(--lm-text-secondary);
-        margin: 0.6rem 0 0.25rem 0.1rem; text-transform: uppercase;
+        font-size: 0.68rem; font-weight: 600; letter-spacing: 0.1em; color: var(--lm-text-secondary);
+        margin: 0.6rem 0 0.5rem 0.2rem; text-transform: uppercase; opacity: 0.9;
     }
 
     /* ===== Part 2: custom LearnMate sidebar =====
@@ -281,48 +281,75 @@ st.markdown(
     }
     .lm-brand-text { min-width: 0; }
 
-    /* Navigation rows (the existing radio) */
-    section[data-testid="stSidebar"] div[role="radiogroup"] { gap: 0.1rem; width: 100%; }
+    /* ===== Navigation: the existing single st.sidebar.radio(), restyled as
+       full-width outlined buttons (centred label, gradient active state).
+       Selection/routing is still 100% Streamlit's radio; this is only CSS. ===== */
+    section[data-testid="stSidebar"] div[role="radiogroup"] {
+        display: flex; flex-direction: column; gap: 0.5rem; width: 100%;
+    }
     section[data-testid="stSidebar"] div[role="radiogroup"] > label {
-        position: relative; width: 100%; box-sizing: border-box; cursor: pointer;
-        border-radius: 10px; padding: 0.5rem 0.75rem; margin: 0;
-        border: 1px solid var(--lm-border); background: transparent;
-        transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+        position: relative; box-sizing: border-box; width: 100%; min-height: 2.6rem;
+        display: flex; align-items: center; justify-content: center; text-align: center;
+        margin: 0; padding: 0.45rem 0.9rem; cursor: pointer;
+        border: 1px solid rgba(167,184,174,0.20); border-radius: 12px;
+        background: rgba(255,255,255,0.015);
+        transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
     }
-    /* hide the radio circle/dot (first <div> child of the label) */
-    section[data-testid="stSidebar"] div[role="radiogroup"] > label > div:first-of-type { display: none; }
+    /* Hide the radio circle. Several narrow rules instead of one list, so a
+       selector a given browser/Streamlit build doesn't understand cannot
+       invalidate the others. The label TEXT lives in the element that holds
+       stMarkdownContainer / <p>, which none of these ever match. */
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label > div:not(:has([data-testid="stMarkdownContainer"])):not(:has(p)) { display: none; }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label > span:not(:has(p)) { display: none; }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label[data-baseweb="radio"] > div:first-child:not(:has(p)) { display: none; }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label input[type="radio"] {
+        position: absolute; opacity: 0; width: 0; height: 0; margin: 0; pointer-events: none;
+    }
+    /* text wrapper: no inherited indent from the circle's slot */
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label > div:has([data-testid="stMarkdownContainer"]),
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label > div:has(p) { margin: 0; padding: 0; width: auto; max-width: 100%; }
     section[data-testid="stSidebar"] div[role="radiogroup"] > label p {
-        font-size: 0.9rem; line-height: 1.3; color: var(--lm-text-secondary); margin: 0;
+        margin: 0; font-size: 0.9rem; font-weight: 600; line-height: 1.25;
+        color: var(--lm-text-secondary); overflow-wrap: anywhere;
+        transition: color 0.15s ease;
     }
+    /* hover */
     section[data-testid="stSidebar"] div[role="radiogroup"] > label:hover {
-        background: rgba(34,197,94,0.08); border-color: var(--lm-border-green);
+        background: rgba(34,197,94,0.08); border-color: rgba(34,197,94,0.45);
     }
     section[data-testid="stSidebar"] div[role="radiogroup"] > label:hover p { color: var(--lm-text); }
+    /* pressed (the brief outlined-accent flash before the page switches) */
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:active {
+        background: rgba(34,197,94,0.10); border-color: var(--lm-green); transform: scale(0.985);
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:active p { color: var(--lm-green); }
+    /* keyboard focus */
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:focus-visible) { outline: 2px solid var(--lm-green); outline-offset: 2px; }
+    /* ACTIVE page: same box as the others, filled emerald gradient + glow */
     section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) {
-        background: linear-gradient(90deg, rgba(34,197,94,0.24) 0%, rgba(16,185,129,0.12) 100%);
-        border-color: var(--lm-border-green);
-        box-shadow: 0 0 12px rgba(34,197,94,0.14);
+        background: linear-gradient(100deg, #15803D 0%, #16A34A 55%, #10B981 100%);
+        border-color: rgba(52,211,153,0.55);
+        box-shadow: 0 6px 18px rgba(16,185,129,0.30);
     }
     section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) p {
-        color: #FFFFFF; font-weight: 700;
+        color: #FFFFFF; font-weight: 700; text-shadow: 0 1px 2px rgba(0,0,0,0.35);
     }
-    section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:focus-visible) {
-        outline: 2px solid var(--lm-green); outline-offset: 1px;
-    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked):active { transform: scale(0.985); }
 
-    /* Group headings: the first group ("INTELLIGENCE", routes 1-4) is the
-       .lm-nav-caption markdown above the radio. The other two are
-       best-effort pseudo-elements positioned ABSOLUTELY above rows 5 and 11
-       (so they are independent of the label's flex layout and are not part
-       of the row's hover/active box). Positions follow the existing route
-       order: 5 = AI Insight Copilot, 11 = Project Summary. */
+    /* Group labels. Group 1 ("INTELLIGENCE", routes 1-4) is the .lm-nav-caption
+       markdown above the radio; groups 2 and 3 are pseudo-elements placed
+       absolutely above routes 5 (AI Insight Copilot) and 11 (Project Summary),
+       with matching room reserved by margin-top. If a Streamlit build nests
+       the labels differently these two headings simply don't draw; navigation
+       is unaffected. */
     section[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-of-type(5),
     section[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-of-type(11) { margin-top: 1.9rem; }
     section[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-of-type(5)::before,
     section[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-of-type(11)::before {
-        position: absolute; left: 0.1rem; bottom: 100%; margin-bottom: 0.4rem;
-        font-size: 0.66rem; font-weight: 700; letter-spacing: 0.09em; line-height: 1;
-        color: var(--lm-text-secondary); white-space: nowrap; pointer-events: none;
+        position: absolute; left: 0.2rem; bottom: calc(100% + 0.65rem);
+        font-size: 0.68rem; font-weight: 600; letter-spacing: 0.1em; line-height: 1;
+        color: var(--lm-text-secondary); opacity: 0.85; white-space: nowrap; pointer-events: none;
+        text-transform: uppercase;
     }
     section[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-of-type(5)::before { content: "AI & PREDICTION"; }
     section[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-of-type(11)::before { content: "PROJECT"; }
@@ -376,7 +403,7 @@ st.markdown(
     /* Mobile: keep the native overlay sidebar usable, no horizontal overflow */
     @media (max-width: 640px) {
         section[data-testid="stSidebar"][aria-expanded="true"] { max-width: 88vw; }
-        section[data-testid="stSidebar"] div[role="radiogroup"] > label { padding: 0.55rem 0.65rem; }
+        section[data-testid="stSidebar"] div[role="radiogroup"] > label { min-height: 2.75rem; padding: 0.5rem 0.6rem; }
         section[data-testid="stSidebar"] div[role="radiogroup"] > label p { font-size: 0.88rem; }
     }
     /* ===== Part 4: tabs, buttons and boundaries =====
@@ -490,6 +517,8 @@ st.markdown(
         :where(.stButton, .stFormSubmitButton, [data-testid="stFormSubmitButton"], .stDownloadButton, [data-testid="stDownloadButton"]) > button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *) { min-height: 2.75rem; padding: 0.5rem 0.9rem; }
     }
     @media (prefers-reduced-motion: reduce) {
+        section[data-testid="stSidebar"] div[role="radiogroup"] > label, section[data-testid="stSidebar"] div[role="radiogroup"] > label p { transition: none; }
+        section[data-testid="stSidebar"] div[role="radiogroup"] > label:active { transform: none; }
         .stTabs [data-baseweb="tab"], :where(.stButton, .stFormSubmitButton, [data-testid="stFormSubmitButton"], .stDownloadButton, [data-testid="stDownloadButton"]) > button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *),
         section[data-testid="stSidebar"] .stButton > button { transition: none; }
         :where(.stButton, .stFormSubmitButton, [data-testid="stFormSubmitButton"], .stDownloadButton, [data-testid="stDownloadButton"]) > button:not(.st-key-lm_ai_chatbot *):not(.st-key-lm_chatbot_launcher *):not(section[data-testid="stSidebar"] *):hover, section[data-testid="stSidebar"] .stButton > button:hover { transform: none; }
